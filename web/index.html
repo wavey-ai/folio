@@ -1,0 +1,146 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta
+      name="description"
+      content="Explore nested JSON as relational tables and build PostgreSQL queries visually."
+    />
+    <title>json2Leaf Studio</title>
+    <link rel="stylesheet" href="./styles.css" />
+  </head>
+  <body>
+    <header class="topbar">
+      <a class="brand" href="#" aria-label="json2Leaf Studio home">
+        <span class="brand-mark" aria-hidden="true"><i></i><i></i><i></i></span>
+        <span>json2Leaf <em>Studio</em></span>
+      </a>
+      <div class="engine-state" id="engine-state">
+        <span aria-hidden="true"></span>
+        <strong>Starting local mapper</strong>
+      </div>
+    </header>
+
+    <main>
+      <section class="hero" aria-labelledby="hero-title">
+        <div>
+          <p class="eyebrow">Document query workbench</p>
+          <h1 id="hero-title">Turn nested documents into tables you can explore.</h1>
+          <p class="hero-copy">
+            Load JSON, inspect its structure, and build PostgreSQL queries from the fields you choose.
+          </p>
+        </div>
+        <div class="import-card">
+          <label class="file-control" for="file-input">
+            <span>Choose a JSON document</span>
+            <input id="file-input" type="file" accept="application/json,.json" />
+          </label>
+          <button class="text-button" id="sample-button" type="button">Use the sample report</button>
+          <p id="document-status" role="status">The sample report is ready.</p>
+        </div>
+      </section>
+
+      <section class="workspace" aria-label="Document query workspace">
+        <aside class="schema-panel panel" aria-labelledby="schema-title">
+          <div class="panel-heading">
+            <div>
+              <p class="panel-kicker">Inferred structure</p>
+              <h2 id="schema-title">Tables</h2>
+            </div>
+            <span class="count-badge" id="table-count">0</span>
+          </div>
+          <div class="table-list" id="table-list"></div>
+        </aside>
+
+        <section class="builder-panel panel" aria-labelledby="builder-title">
+          <div class="panel-heading">
+            <div>
+              <p class="panel-kicker">Visual query</p>
+              <h2 id="builder-title">Ask this document</h2>
+            </div>
+            <button class="primary-button" id="run-button" type="button">Run preview</button>
+          </div>
+
+          <div class="builder-grid">
+            <label>
+              <span>Table</span>
+              <select id="table-select"></select>
+            </label>
+            <label>
+              <span>Operation</span>
+              <select id="operation-select">
+                <option value="rows">Show rows</option>
+                <option value="count">Count rows</option>
+                <option value="sum">Add a number field</option>
+                <option value="average">Average a number field</option>
+                <option value="tree">Show the document tree</option>
+              </select>
+            </label>
+          </div>
+
+          <fieldset class="field-picker">
+            <legend>Fields</legend>
+            <div id="field-options"></div>
+          </fieldset>
+
+          <div class="filter-block">
+            <div class="section-label">
+              <span>Filter</span>
+              <button class="text-button compact" id="clear-filter" type="button">Clear</button>
+            </div>
+            <div class="filter-grid">
+              <select id="filter-field" aria-label="Filter field">
+                <option value="">Choose a field</option>
+              </select>
+              <select id="filter-operator" aria-label="Filter operator">
+                <option value="equals">equals</option>
+                <option value="contains">contains</option>
+                <option value="greater">is greater than</option>
+                <option value="less">is less than</option>
+              </select>
+              <input id="filter-value" type="text" placeholder="Value" aria-label="Filter value" />
+            </div>
+          </div>
+
+          <div class="sql-block">
+            <div class="section-label">
+              <span>Generated PostgreSQL</span>
+              <button class="text-button compact" id="copy-button" type="button">Copy SQL</button>
+            </div>
+            <pre><code id="sql-output"></code></pre>
+          </div>
+        </section>
+
+        <section class="result-panel panel" aria-labelledby="result-title">
+          <div class="panel-heading">
+            <div>
+              <p class="panel-kicker">Local preview</p>
+              <h2 id="result-title">Result</h2>
+            </div>
+            <span class="count-badge subtle" id="row-count">0 rows</span>
+          </div>
+          <div class="result-wrap" id="result-wrap">
+            <div class="empty-result">
+              <span aria-hidden="true">↳</span>
+              <p>Choose fields, then run the preview.</p>
+            </div>
+          </div>
+        </section>
+      </section>
+    </main>
+
+    <template id="table-template">
+      <button class="table-item" type="button">
+        <span class="table-icon" aria-hidden="true"></span>
+        <span class="table-copy">
+          <strong></strong>
+          <small></small>
+        </span>
+        <span class="table-arrow" aria-hidden="true">→</span>
+      </button>
+    </template>
+
+    <script type="module" src="./app.js"></script>
+  </body>
+</html>

@@ -1,0 +1,25 @@
+{
+  "column_overrides": [
+    {
+      "table": "report",
+      "path": "author__name",
+      "target_table": "author",
+      "target_path": "name"
+    }
+  ],
+  "column_substitutions": [
+    {
+      "from": "postal_code",
+      "to": "postcode"
+    }
+  ],
+  "table_names": [
+    "account__contact"
+  ],
+  "table_substitutions": [
+    {
+      "from": "purchase_order",
+      "to": "order"
+    }
+  ]
+}

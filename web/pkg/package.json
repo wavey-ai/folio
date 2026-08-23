@@ -1,0 +1,27 @@
+{
+  "name": "json2leaf",
+  "type": "module",
+  "description": "Map nested JSON and XML documents into relational leaf rows",
+  "version": "0.2.0",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/wavey-ai/json2Leaf"
+  },
+  "files": [
+    "json2leaf_bg.wasm",
+    "json2leaf.js",
+    "json2leaf.d.ts"
+  ],
+  "main": "json2leaf.js",
+  "types": "json2leaf.d.ts",
+  "sideEffects": [
+    "./snippets/*"
+  ],
+  "keywords": [
+    "json",
+    "postgresql",
+    "schema",
+    "wasm",
+    "xml"
+  ]
+}
