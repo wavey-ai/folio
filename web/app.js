@@ -41,7 +41,7 @@ const elements = {
 };
 
 function WorkerClient(path, onEvent = () => {}) {
-  this.worker = new Worker(`${path}?v=20260823-8`, { type: "module" });
+  this.worker = new Worker(`${path}?v=20260823-10`, { type: "module" });
   this.nextId = 0;
   this.pending = new Map();
   this.worker.addEventListener("message", ({ data }) => {
@@ -438,6 +438,12 @@ function handleModelEvent(event) {
       : "Ready for local questions in this browser.";
     elements.modelLoadButton.textContent = "Model ready";
     elements.modelLoadButton.disabled = true;
+  } else if (event.status === "loading") {
+    elements.modelLoader.classList.add("loading");
+    elements.modelLoader.classList.remove("error");
+    elements.modelProgressBar.style.width = "100%";
+    elements.modelStatus.textContent = "Starting the local model";
+    elements.modelProgressCopy.textContent = "The download is complete. Folio is loading the model into memory.";
   } else if (event.status === "thinking") {
     elements.modelStatus.textContent = "Writing PostgreSQL";
     elements.modelProgressCopy.textContent = "The model is working with this document's schema.";
@@ -466,7 +472,10 @@ async function askFolio(event) {
     setAssistantStage("plan");
     setAssistantMessage("Planning the report from the inferred schema…");
 
-    const postgresReady = ensurePostgresData();
+    const postgresReady = ensurePostgresData().then(
+      () => ({ error: null }),
+      (error) => ({ error }),
+    );
     await prepareModel();
     let { proposal } = await llm.call("ask", { question, context });
     proposal = validateProposal(proposal);
@@ -474,7 +483,8 @@ async function askFolio(event) {
     completeAssistantStage("plan");
     setAssistantStage("check");
     setAssistantMessage("Checking the query with PostgreSQL…");
-    await postgresReady;
+    const postgresState = await postgresReady;
+    if (postgresState.error) throw postgresState.error;
 
     let result = await postgres.exec(proposal.sql);
     for (let attempt = 0; result.kind === "error" && attempt < 2; attempt += 1) {

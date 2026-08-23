@@ -1,4 +1,4 @@
-import { Wllama } from "./vendor/wllama/index.js?v=20260823-8";
+import { Wllama } from "./vendor/wllama/index.js?v=20260823-10";
 import {
   QUERY_RESPONSE_SCHEMA,
   buildRepairPrompt,
@@ -80,9 +80,11 @@ async function loadModel() {
       worker: new URL("./vendor/wllama/wllama-compat.js", import.meta.url).href,
     });
     const webgpu = runtime.isSupportWebGPU();
+    const safari = /^((?!chrome|android).)*safari/i.test(navigator.userAgent);
+    let downloadComplete = false;
     await runtime.loadModelFromHF(MODEL, {
-      n_ctx: 8_192,
-      n_batch: 256,
+      n_ctx: safari ? 4_096 : 8_192,
+      n_batch: safari ? 128 : 256,
       n_gpu_layers: webgpu ? 99 : 0,
       cache_type_k: "q8_0",
       cache_type_v: "q8_0",
@@ -96,6 +98,14 @@ async function loadModel() {
           total: totalBytes,
           percent: totalBytes ? Math.round((loadedBytes / totalBytes) * 100) : 0,
         });
+        if (!downloadComplete && totalBytes > 0 && loadedBytes >= totalBytes) {
+          downloadComplete = true;
+          self.postMessage({
+            type: "model-status",
+            status: "loading",
+            message: "Starting the local model…",
+          });
+        }
       },
     });
     const info = modelInfo();

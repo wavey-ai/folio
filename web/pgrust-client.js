@@ -11,7 +11,7 @@ export class PgrustClient {
 
   boot() {
     if (this.ready) return this.ready;
-    const workerUrl = new URL("./vendor/pgrust/worker.js?v=20260823-6", import.meta.url);
+    const workerUrl = new URL("./vendor/pgrust/worker.js?v=20260823-10", import.meta.url);
     this.worker = new Worker(workerUrl, { type: "module" });
     this.ready = new Promise((resolve, reject) => {
       this.worker.addEventListener("message", ({ data }) => {
