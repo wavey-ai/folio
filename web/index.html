@@ -10,7 +10,7 @@
       content="Turn JSON and XML documents into fully traversable schemas and PostgreSQL reports."
     />
     <title>Folio Studio</title>
-    <link rel="stylesheet" href="./styles.css?v=20260823-6" />
+    <link rel="stylesheet" href="./styles.css?v=20260823-15" />
   </head>
   <body>
     <header class="topbar">
@@ -59,13 +59,13 @@
             <h2 id="ask-title">Ask Folio</h2>
             <p>Describe the report you want. Folio will find the schema, write PostgreSQL, and check the query.</p>
           </div>
-          <span class="model-badge">Qwen3.5 · 0.8B · Q4</span>
+          <span class="model-badge">LFM2.5 · 230M · Q4</span>
         </div>
 
         <div class="model-loader" id="model-loader">
           <div class="model-loader-copy">
             <strong id="model-status">Local model available</strong>
-            <span id="model-progress-copy">The first use downloads about 530 MB. Your browser saves it for later.</span>
+            <span id="model-progress-copy">The first use downloads about 153 MB. Your browser saves it for later.</span>
           </div>
           <div class="model-progress" aria-hidden="true">
             <i id="model-progress-bar"></i>
@@ -73,14 +73,21 @@
           <button class="secondary-button" id="model-load-button" type="button">Prepare local model</button>
         </div>
 
+        <aside class="browser-check" id="browser-check" role="status">
+          <div>
+            <strong id="browser-check-title">Checking this browser</strong>
+            <p id="browser-check-status">Checking WebGPU and local model support…</p>
+          </div>
+          <ol id="browser-check-guidance" hidden></ol>
+        </aside>
+
         <form class="ask-form" id="ask-form">
           <label for="ask-input">What do you want to know?</label>
           <div class="ask-control">
             <textarea
               id="ask-input"
               rows="2"
-              placeholder="Which pathways are direct components of Programmed Cell Death?"
-            ></textarea>
+            >Which proteins participate in reactions across the greatest number of distinct pathways? Show each protein's name, pathway count, reaction count, and pathway names. Include proteins found in at least three pathways and sort by pathway count.</textarea>
             <button class="primary-button" id="ask-button" type="submit">Write query</button>
           </div>
         </form>
@@ -265,6 +272,6 @@ JOIN nodes AS parent
       </button>
     </template>
 
-    <script type="module" src="./app.js?v=20260823-10"></script>
+    <script type="module" src="./app.js?v=20260823-15"></script>
   </body>
 </html>

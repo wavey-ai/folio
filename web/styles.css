@@ -423,6 +423,68 @@ p {
   background: var(--leaf-soft);
 }
 
+.browser-check {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  width: fit-content;
+  margin-top: 8px;
+  padding: 6px 10px;
+  border: 1px solid rgb(157 113 45 / 30%);
+  border-radius: 12px;
+  background: rgb(191 149 79 / 9%);
+}
+
+.browser-check.needs-guidance {
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: 12px;
+  width: auto;
+  margin-top: 12px;
+  padding: 12px;
+}
+
+.browser-check > div {
+  display: flex;
+  align-items: baseline;
+  gap: 7px;
+}
+
+.browser-check.ready {
+  border-color: rgb(77 101 75 / 30%);
+  background: var(--leaf-soft);
+}
+
+.browser-check.fallback {
+  border-color: rgb(157 113 45 / 30%);
+}
+
+.browser-check strong {
+  font-size: 11px;
+}
+
+.browser-check p {
+  margin: 0;
+  color: var(--muted);
+  font-size: 10px;
+  line-height: 1.5;
+}
+
+.browser-check p::before {
+  content: "· ";
+}
+
+.browser-check ol {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 7px 22px;
+  margin: 0;
+  padding-left: 20px;
+  color: var(--ink-soft);
+  font-size: 10px;
+  line-height: 1.45;
+}
+
 .model-loader-copy strong,
 .model-loader-copy span {
   display: block;
@@ -1136,6 +1198,8 @@ input[type="text"] {
   }
 
   .model-loader,
+  .browser-check,
+  .browser-check ol,
   .ask-control,
   .schema-patterns {
     grid-template-columns: 1fr;

@@ -33,6 +33,10 @@ const elements = {
   modelProgressCopy: document.querySelector("#model-progress-copy"),
   modelProgressBar: document.querySelector("#model-progress-bar"),
   modelLoadButton: document.querySelector("#model-load-button"),
+  browserCheck: document.querySelector("#browser-check"),
+  browserCheckTitle: document.querySelector("#browser-check-title"),
+  browserCheckStatus: document.querySelector("#browser-check-status"),
+  browserCheckGuidance: document.querySelector("#browser-check-guidance"),
   askForm: document.querySelector("#ask-form"),
   askInput: document.querySelector("#ask-input"),
   askButton: document.querySelector("#ask-button"),
@@ -41,7 +45,7 @@ const elements = {
 };
 
 function WorkerClient(path, onEvent = () => {}) {
-  this.worker = new Worker(`${path}?v=20260823-10`, { type: "module" });
+  this.worker = new Worker(`${path}?v=20260823-15`, { type: "module" });
   this.nextId = 0;
   this.pending = new Map();
   this.worker.addEventListener("message", ({ data }) => {
@@ -103,6 +107,7 @@ const mapper = new WorkerClient("./mapper.worker.js");
 const dataStore = new WorkerClient("./data.worker.js");
 const search = new WorkerClient("./search.worker.js");
 const llm = new WorkerClient("./llm.worker.js", handleModelEvent);
+const capabilities = new WorkerClient("./capability.worker.js");
 const postgres = new PgrustClient(handlePostgresEvent);
 
 elements.modelLoadButton.addEventListener("click", () => {
@@ -150,6 +155,7 @@ elements.copyButton.addEventListener("click", async () => {
 });
 
 elements.askButton.disabled = true;
+checkBrowser();
 await mapper.call("ready");
 elements.engineState.classList.add("ready");
 elements.engineState.querySelector("strong").textContent = "Ready in this browser";
@@ -393,11 +399,11 @@ async function runEditableQuery() {
 }
 
 async function prepareModel() {
-  if (state.modelReady) return { model: "Qwen3.5-0.8B Q4_K_M" };
+  if (state.modelReady) return { model: "LFM2.5-230M Q4_K_M" };
   if (state.modelLoading) return state.modelLoading;
   elements.modelLoadButton.disabled = true;
   elements.modelStatus.textContent = "Preparing the local model";
-  elements.modelProgressCopy.textContent = "Starting the 530 MB download…";
+  elements.modelProgressCopy.textContent = "Starting the 153 MB download…";
   state.modelLoading = llm.call("load")
     .then((info) => {
       state.modelReady = true;
@@ -433,9 +439,9 @@ function handleModelEvent(event) {
     elements.modelLoader.classList.add("ready");
     elements.modelProgressBar.style.width = "100%";
     elements.modelStatus.textContent = "Local model ready";
-    elements.modelProgressCopy.textContent = event.webgpu
+    elements.modelProgressCopy.textContent = event.backend === "webgpu"
       ? "Ready for local questions with WebGPU acceleration."
-      : "Ready for local questions in this browser.";
+      : "Ready for local questions with CPU compatibility.";
     elements.modelLoadButton.textContent = "Model ready";
     elements.modelLoadButton.disabled = true;
   } else if (event.status === "loading") {
@@ -444,10 +450,56 @@ function handleModelEvent(event) {
     elements.modelProgressBar.style.width = "100%";
     elements.modelStatus.textContent = "Starting the local model";
     elements.modelProgressCopy.textContent = "The download is complete. Folio is loading the model into memory.";
+  } else if (event.status === "fallback") {
+    elements.modelLoader.classList.add("loading");
+    elements.modelLoader.classList.remove("error");
+    elements.modelProgressBar.style.width = "100%";
+    elements.modelStatus.textContent = "Starting CPU compatibility";
+    elements.modelProgressCopy.textContent = "The model is downloaded. Folio is starting it with the CPU runtime.";
+    showRuntimeFallback(event.message);
   } else if (event.status === "thinking") {
     elements.modelStatus.textContent = "Writing PostgreSQL";
     elements.modelProgressCopy.textContent = "The model is working with this document's schema.";
   }
+}
+
+async function checkBrowser() {
+  try {
+    const result = await capabilities.call("check");
+    elements.browserCheck.classList.toggle("ready", result.webgpuReady);
+    elements.browserCheck.classList.toggle("fallback", !result.webgpuReady);
+    elements.browserCheckTitle.textContent = result.webgpuReady
+      ? "WebGPU ready"
+      : "CPU compatibility ready";
+    elements.browserCheckStatus.textContent = result.webgpuReady
+      ? `${result.browser} can run the local model on this GPU.`
+      : `${result.browser} can run the local model with the CPU runtime.`;
+    elements.browserCheckGuidance.replaceChildren(
+      ...result.guidance.map((instruction) => {
+        const item = document.createElement("li");
+        item.textContent = instruction;
+        return item;
+      }),
+    );
+    elements.browserCheck.classList.toggle("needs-guidance", result.guidance.length > 0);
+    elements.browserCheckGuidance.hidden = result.guidance.length === 0;
+  } catch (error) {
+    elements.browserCheck.classList.add("fallback");
+    elements.browserCheck.classList.remove("needs-guidance");
+    elements.browserCheckTitle.textContent = "CPU compatibility ready";
+    elements.browserCheckStatus.textContent = "Folio can start the local model with its CPU runtime.";
+    elements.browserCheckGuidance.hidden = true;
+  }
+}
+
+function showRuntimeFallback(message) {
+  elements.browserCheck.classList.remove("ready");
+  elements.browserCheck.classList.remove("needs-guidance");
+  elements.browserCheck.classList.add("fallback");
+  elements.browserCheckTitle.textContent = "CPU compatibility active";
+  elements.browserCheckStatus.textContent = message
+    || "This browser stopped the WebGPU runtime during startup. Folio switched to the CPU runtime.";
+  elements.browserCheckGuidance.hidden = true;
 }
 
 async function askFolio(event) {
@@ -563,8 +615,19 @@ async function ensurePostgresData() {
       setAssistantMessage(`Preparing PostgreSQL · ${percent}%`);
       if (batch.done) break;
     }
-    assertPostgresResult(await postgres.exec(await dataStore.call("postgresIndexes")));
+    setAssistantMessage("Building PostgreSQL indexes · starting");
+    const indexStartedAt = performance.now();
+    const indexTimer = window.setInterval(() => {
+      const seconds = Math.max(1, Math.round((performance.now() - indexStartedAt) / 1_000));
+      setAssistantMessage(`Building PostgreSQL indexes · ${seconds}s`);
+    }, 1_000);
+    try {
+      assertPostgresResult(await postgres.exec(await dataStore.call("postgresIndexes")));
+    } finally {
+      window.clearInterval(indexTimer);
+    }
     state.postgresReadyGeneration = generation;
+    setAssistantMessage("PostgreSQL ready · checking the query");
   })();
 
   try {
