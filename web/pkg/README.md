@@ -60,12 +60,13 @@ Build JavaScript bindings with `wasm-pack`:
 wasm-pack build --target web --no-default-features --features wasm
 ```
 
-The bindings export `mapJson`, `jsonToSql`, `jsonToInsertSql`, and `jsonToDot`.
-Each function accepts a source name, a JSON string, and an optional configuration string.
+The bindings export `mapJson`, `mapXml`, `jsonToSql`, `jsonToInsertSql`, `jsonToDot`, and `TrigramIndex`.
+Each mapping function accepts a source name, a document string, and an optional configuration string.
 
 ## Folio Studio
 
 Folio is the browser studio for json2Leaf.
+It turns each document into a traversable schema for reporting.
 
 Build the browser bindings:
 
@@ -81,9 +82,15 @@ python3 -m http.server 8000
 ```
 
 Open `http://localhost:8000/web/`.
-Folio maps a JSON document in the browser.
+Folio maps JSON and XML documents in the browser.
 It infers tables and creates PostgreSQL for visual query plans.
 The local preview lets you check each plan before you use its SQL.
+Dedicated workers map documents, prepare table data, and search elements.
+The trigram worker builds its postings when the first search starts.
+It reuses the postings for each later search.
+Use the 30 MB Reactome BioPAX sample to explore pathways, reactions, proteins, evidence, and cross-references.
+The initial report joins pathways to component references through `parent_id`.
+It then resolves each reference to the related pathway record.
 
 ## pgrust Wasm test
 
@@ -97,7 +104,7 @@ tests/pgrust-wasm.sh
 ```
 
 The test loads generated SQL into pgrust Wasm.
-It checks recursive traversal, typed values, aggregation, and root values.
+It checks recursive traversal, typed values, aggregation, root values, and relationship joins.
 
 ## Current scope
 
@@ -105,4 +112,4 @@ The mapper supports JSON objects, arrays, strings, numbers, Booleans, and null v
 The mapper represents each null value as an empty leaf set.
 
 The command-line program reads JSON and XML files.
-The browser bindings focus on JSON input.
+The browser bindings accept JSON and XML input.

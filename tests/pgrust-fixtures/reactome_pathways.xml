@@ -1,0 +1,17 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<rdf:RDF
+  xmlns:rdf="http://www.w3.org/1999/02/22-rdf-syntax-ns#"
+  xmlns:bp="http://www.biopax.org/release/biopax-level3.owl#"
+>
+  <bp:Pathway rdf:ID="Pathway1">
+    <bp:pathwayComponent rdf:resource="#Pathway2" />
+    <bp:pathwayComponent rdf:resource="#Pathway8" />
+    <bp:displayName rdf:datatype="http://www.w3.org/2001/XMLSchema#string">Programmed Cell Death</bp:displayName>
+  </bp:Pathway>
+  <bp:Pathway rdf:ID="Pathway2">
+    <bp:displayName rdf:datatype="http://www.w3.org/2001/XMLSchema#string">Apoptosis</bp:displayName>
+  </bp:Pathway>
+  <bp:Pathway rdf:ID="Pathway8">
+    <bp:displayName rdf:datatype="http://www.w3.org/2001/XMLSchema#string">Regulated Necrosis</bp:displayName>
+  </bp:Pathway>
+</rdf:RDF>

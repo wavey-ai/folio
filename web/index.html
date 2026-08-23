@@ -3,12 +3,14 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="theme-color" content="#e8ddc7" />
+    <link rel="icon" href="./favicon.svg" type="image/svg+xml" />
     <meta
       name="description"
-      content="Explore nested JSON as relational tables and build PostgreSQL queries visually."
+      content="Turn JSON and XML documents into fully traversable schemas and PostgreSQL reports."
     />
     <title>Folio Studio</title>
-    <link rel="stylesheet" href="./styles.css" />
+    <link rel="stylesheet" href="./styles.css?v=20260823-5" />
   </head>
   <body>
     <header class="topbar">
@@ -18,30 +20,39 @@
       </a>
       <div class="engine-state" id="engine-state">
         <span aria-hidden="true"></span>
-        <strong>Starting local mapper</strong>
+        <strong>Preparing Folio</strong>
       </div>
     </header>
 
     <main>
-      <section class="hero" aria-labelledby="hero-title">
-        <div>
-          <p class="eyebrow">Document query workbench</p>
-          <h1 id="hero-title">Turn nested documents into tables you can explore.</h1>
-          <p class="hero-copy">
-            Load JSON, inspect its structure, and build PostgreSQL queries from the fields you choose.
-          </p>
+      <section class="hero" aria-label="Open a document">
+        <div class="product-promise">
+          <h1>Turn any document into a fully traversable schema, instantly.</h1>
+          <p>Explore every path. Build reports from any field.</p>
+          <ol class="prep-stages" id="prep-stages" aria-label="Document preparation">
+            <li data-stage="read"><i aria-hidden="true"></i><span>Read document</span></li>
+            <li data-stage="map"><i aria-hidden="true"></i><span>Map structure</span></li>
+            <li data-stage="catalog"><i aria-hidden="true"></i><span>Build tables</span></li>
+            <li data-stage="index"><i aria-hidden="true"></i><span>Index elements</span></li>
+          </ol>
         </div>
-        <div class="import-card">
+        <div class="import-card" id="document-prep">
           <label class="file-control" for="file-input">
-            <span>Choose a JSON document</span>
-            <input id="file-input" type="file" accept="application/json,.json" />
+            <span>Choose a JSON or XML document</span>
+            <input
+              id="file-input"
+              type="file"
+              accept="application/json,application/xml,text/xml,.json,.xml"
+            />
           </label>
-          <button class="text-button" id="sample-button" type="button">Use the sample report</button>
-          <p id="document-status" role="status">The sample report is ready.</p>
+          <div class="sample-actions">
+            <button class="text-button" id="reactome-button" type="button">Explore 30 MB of pathways</button>
+          </div>
+          <p id="document-status" role="status">Preparing the pathway document…</p>
         </div>
       </section>
 
-      <section class="workspace" aria-label="Document query workspace">
+      <section class="workspace" id="workspace" aria-label="Document query workspace">
         <aside class="schema-panel panel" aria-labelledby="schema-title">
           <div class="panel-heading">
             <div>
@@ -50,6 +61,15 @@
             </div>
             <span class="count-badge" id="table-count">0</span>
           </div>
+          <label class="table-search">
+            <span class="visually-hidden">Search tables, elements, and fields</span>
+            <input
+              id="table-search"
+              type="search"
+              autocomplete="off"
+              placeholder="Find elements or fields"
+            />
+          </label>
           <div class="table-list" id="table-list"></div>
         </aside>
 
@@ -79,12 +99,14 @@
             </label>
           </div>
 
-          <fieldset class="field-picker">
+          <p class="query-prompt" id="query-prompt" hidden></p>
+
+          <fieldset class="field-picker" id="field-picker">
             <legend>Fields</legend>
             <div id="field-options"></div>
           </fieldset>
 
-          <div class="filter-block">
+          <div class="filter-block" id="filter-block">
             <div class="section-label">
               <span>Filter</span>
               <button class="text-button compact" id="clear-filter" type="button">Clear</button>
@@ -130,6 +152,22 @@
       </section>
     </main>
 
+    <footer class="site-footer">
+      <div class="footer-identity">
+        <strong>Folio Studio</strong>
+        <span>Document reporting</span>
+      </div>
+      <p>JSON + XML <i aria-hidden="true">→</i> PostgreSQL</p>
+      <nav aria-label="Project links">
+        <a href="https://github.com/wavey-ai/json2Leaf" target="_blank" rel="noreferrer">
+          <span>GitHub:</span> json2Leaf <i aria-hidden="true">↗</i>
+        </a>
+        <a href="https://wavey.ai" target="_blank" rel="noreferrer">
+          wavey.ai <i aria-hidden="true">↗</i>
+        </a>
+      </nav>
+    </footer>
+
     <template id="table-template">
       <button class="table-item" type="button">
         <span class="table-icon" aria-hidden="true"></span>
@@ -141,6 +179,6 @@
       </button>
     </template>
 
-    <script type="module" src="./app.js"></script>
+    <script type="module" src="./app.js?v=20260823-5"></script>
   </body>
 </html>

@@ -56,3 +56,65 @@ test("text search works with each inferred field type", () => {
 
   assert.match(sql, /"amount"::text ILIKE '%25%'/);
 });
+
+test("relationship report joins child records through parent ids", () => {
+  const sql = buildSql({ operation: "pathway-components" }, []);
+
+  assert.match(sql, /reference\.parent_id = parent\.id/);
+  assert.match(sql, /component\.pathway_id = ltrim\(reference\.resource_id, '#'\)/);
+  assert.match(sql, /Programmed Cell Death/);
+});
+
+test("relationship preview resolves component pathway names", () => {
+  const relationshipLeaves = [
+    {
+      id: "parent",
+      parent_id: "root",
+      name: "reactome_pathways__bp:pathway",
+      path: "@rdf:id",
+      value: "Pathway1",
+      data_type: "string",
+    },
+    {
+      id: "parent",
+      parent_id: "root",
+      name: "reactome_pathways__bp:pathway",
+      path: "bp:display_name__$text",
+      value: "Programmed Cell Death",
+      data_type: "string",
+    },
+    {
+      id: "component",
+      parent_id: "root",
+      name: "reactome_pathways__bp:pathway",
+      path: "@rdf:id",
+      value: "Pathway2",
+      data_type: "string",
+    },
+    {
+      id: "component",
+      parent_id: "root",
+      name: "reactome_pathways__bp:pathway",
+      path: "bp:display_name__$text",
+      value: "Apoptosis",
+      data_type: "string",
+    },
+    {
+      id: "reference",
+      parent_id: "parent",
+      name: "reactome_pathways__bp:pathway__bp:pathway_component",
+      path: "@rdf:resource",
+      value: "#Pathway2",
+      data_type: "string",
+    },
+  ];
+
+  const result = preview(
+    { operation: "pathway-components" },
+    relationshipLeaves,
+    buildCatalog(relationshipLeaves),
+  );
+
+  assert.deepEqual(result.columns, ["pathway", "component"]);
+  assert.deepEqual(result.rows, [{ pathway: "Programmed Cell Death", component: "Apoptosis" }]);
+});

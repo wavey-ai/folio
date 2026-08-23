@@ -1,6 +1,9 @@
 const identifier = (value) => `"${String(value).replaceAll('"', '""')}"`;
 const literal = (value) => `'${String(value).replaceAll("'", "''")}'`;
 
+const pathwayTable = "reactome_pathways__bp:pathway";
+const componentTable = "reactome_pathways__bp:pathway__bp:pathway_component";
+
 export function buildCatalog(leaves) {
   const tables = new Map();
   for (const leaf of leaves) {
@@ -25,6 +28,7 @@ export function buildCatalog(leaves) {
 
 export function buildSql(plan, catalog) {
   if (plan.operation === "tree") return treeSql();
+  if (plan.operation === "pathway-components") return pathwayComponentsSql();
   const table = catalog.find((item) => item.name === plan.table);
   if (!table) return "SELECT 'Choose a table' AS next_step;";
 
@@ -54,6 +58,7 @@ export function buildSql(plan, catalog) {
 
 export function preview(plan, leaves, catalog) {
   if (plan.operation === "tree") return previewTree(leaves);
+  if (plan.operation === "pathway-components") return previewPathwayComponents(leaves);
   const table = catalog.find((item) => item.name === plan.table);
   if (!table) return { columns: [], rows: [] };
   const selected = plan.fields.length ? plan.fields : table.fields.map((field) => field.name);
@@ -84,7 +89,9 @@ export function preview(plan, leaves, catalog) {
 
   return {
     columns: selected,
-    rows: rows.map((row) => Object.fromEntries(selected.map((field) => [field, row[field]]))),
+    rows: rows
+      .slice(0, 100)
+      .map((row) => Object.fromEntries(selected.map((field) => [field, row[field]]))),
   };
 }
 
@@ -128,6 +135,68 @@ function treeSql() {
 SELECT id, parent_id, table_name, depth
 FROM tree
 ORDER BY depth, table_name;`;
+}
+
+function pathwayComponentsSql() {
+  return `WITH pathway AS (
+    SELECT
+        id,
+        max(value) FILTER (WHERE path = '@rdf:id') AS pathway_id,
+        max(value) FILTER (WHERE path = 'bp:display_name__$text') AS pathway_name
+    FROM nodes
+    WHERE name = '${pathwayTable}'
+    GROUP BY id
+),
+component_reference AS (
+    SELECT
+        id,
+        parent_id,
+        max(value) FILTER (WHERE path = '@rdf:resource') AS resource_id
+    FROM nodes
+    WHERE name = '${componentTable}'
+    GROUP BY id, parent_id
+)
+SELECT
+    parent.pathway_name AS pathway,
+    component.pathway_name AS component
+FROM pathway AS parent
+JOIN component_reference AS reference
+  ON reference.parent_id = parent.id
+JOIN pathway AS component
+  ON component.pathway_id = ltrim(reference.resource_id, '#')
+WHERE parent.pathway_name = 'Programmed Cell Death'
+ORDER BY component.pathway_name;`;
+}
+
+function previewPathwayComponents(leaves) {
+  const pathways = recordsFor(leaves, pathwayTable);
+  const references = recordsFor(leaves, componentTable);
+  const byIdentifier = new Map(pathways.map((pathway) => [pathway["@rdf:id"], pathway]));
+  const rows = references
+    .map((reference) => {
+      const parent = pathways.find((pathway) => pathway.id === reference.parent_id);
+      const component = byIdentifier.get(String(reference["@rdf:resource"] || "").replace(/^#/, ""));
+      return {
+        pathway: parent?.["bp:display_name__$text"],
+        component: component?.["bp:display_name__$text"],
+      };
+    })
+    .filter((row) => row.pathway === "Programmed Cell Death" && row.component)
+    .sort((left, right) => left.component.localeCompare(right.component));
+
+  return { columns: ["pathway", "component"], rows };
+}
+
+function recordsFor(leaves, name) {
+  const records = new Map();
+  for (const leaf of leaves) {
+    if (leaf.name !== name) continue;
+    if (!records.has(leaf.id)) {
+      records.set(leaf.id, { id: leaf.id, parent_id: leaf.parent_id });
+    }
+    records.get(leaf.id)[leaf.path] = leaf.value;
+  }
+  return [...records.values()];
 }
 
 function previewTree(leaves) {

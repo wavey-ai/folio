@@ -2,6 +2,6 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "test": "node --test query-planner.test.mjs"
+    "test": "node --test *.test.mjs"
   }
 }

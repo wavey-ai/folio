@@ -1,0 +1,7 @@
+{
+  "title": "Quarterly report",
+  "items": [
+    { "name": "Revenue", "amount": 125.5 },
+    { "name": "Costs", "amount": 80 }
+  ]
+}

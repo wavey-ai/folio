@@ -1,6 +1,14 @@
 /* tslint:disable */
 /* eslint-disable */
 
+export class TrigramIndex {
+    free(): void;
+    [Symbol.dispose](): void;
+    add(id: string, text: string): void;
+    constructor();
+    search(query: string, limit: number): string;
+}
+
 export function jsonToDot(name: string, input: string, config_json?: string | null): string;
 
 export function jsonToInsertSql(name: string, input: string, config_json?: string | null): string;
@@ -9,14 +17,21 @@ export function jsonToSql(name: string, input: string, config_json?: string | nu
 
 export function mapJson(name: string, input: string, config_json?: string | null): string;
 
+export function mapXml(name: string, input: string, config_json?: string | null): string;
+
 export type InitInput = RequestInfo | URL | Response | BufferSource | WebAssembly.Module;
 
 export interface InitOutput {
     readonly memory: WebAssembly.Memory;
+    readonly __wbg_trigramindex_free: (a: number, b: number) => void;
     readonly jsonToDot: (a: number, b: number, c: number, d: number, e: number, f: number) => [number, number, number, number];
     readonly jsonToInsertSql: (a: number, b: number, c: number, d: number, e: number, f: number) => [number, number, number, number];
     readonly jsonToSql: (a: number, b: number, c: number, d: number, e: number, f: number) => [number, number, number, number];
     readonly mapJson: (a: number, b: number, c: number, d: number, e: number, f: number) => [number, number, number, number];
+    readonly mapXml: (a: number, b: number, c: number, d: number, e: number, f: number) => [number, number, number, number];
+    readonly trigramindex_add: (a: number, b: number, c: number, d: number, e: number) => void;
+    readonly trigramindex_new: () => number;
+    readonly trigramindex_search: (a: number, b: number, c: number, d: number) => [number, number, number, number];
     readonly __wbindgen_externrefs: WebAssembly.Table;
     readonly __wbindgen_malloc: (a: number, b: number) => number;
     readonly __wbindgen_realloc: (a: number, b: number, c: number, d: number) => number;

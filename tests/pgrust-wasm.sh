@@ -18,7 +18,7 @@ WORK=$(mktemp -d)
 trap 'rm -rf "$WORK"' EXIT
 
 cargo run --quiet --manifest-path "$ROOT/Cargo.toml" -- \
-    "$ROOT/tests/fixtures/report.json" \
+    "$ROOT/tests/pgrust-fixtures" \
     --format sql \
     --sql-mode insert \
     --output "$WORK/load.sql"
@@ -32,5 +32,6 @@ node "$PGRUST_ROOT/wasm/run-node.mjs" --raw \
 grep -q 'JSON2LEAF_TREE_OK' "$WORK/result.out"
 grep -q 'JSON2LEAF_ROWS_OK' "$WORK/result.out"
 grep -q 'JSON2LEAF_ROOT_OK' "$WORK/result.out"
+grep -q 'JSON2LEAF_RELATIONSHIP_OK' "$WORK/result.out"
 
 echo "json2Leaf pgrust Wasm queries passed."

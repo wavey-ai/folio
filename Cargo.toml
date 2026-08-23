@@ -19,7 +19,7 @@ required-features = ["cli"]
 default = ["cli", "xml"]
 cli = ["dep:anyhow", "dep:clap", "dep:walkdir"]
 xml = ["dep:quick-xml"]
-wasm = ["dep:wasm-bindgen"]
+wasm = ["dep:wasm-bindgen", "xml"]
 
 [dependencies]
 regex = "1.11"
