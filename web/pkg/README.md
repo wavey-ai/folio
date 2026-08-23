@@ -63,7 +63,9 @@ wasm-pack build --target web --no-default-features --features wasm
 The bindings export `mapJson`, `jsonToSql`, `jsonToInsertSql`, and `jsonToDot`.
 Each function accepts a source name, a JSON string, and an optional configuration string.
 
-## Browser studio
+## Folio Studio
+
+Folio is the browser studio for json2Leaf.
 
 Build the browser bindings:
 
@@ -79,7 +81,7 @@ python3 -m http.server 8000
 ```
 
 Open `http://localhost:8000/web/`.
-The studio maps a JSON document in the browser.
+Folio maps a JSON document in the browser.
 It infers tables and creates PostgreSQL for visual query plans.
 The local preview lets you check each plan before you use its SQL.
 
