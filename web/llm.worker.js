@@ -1,4 +1,4 @@
-import { Wllama } from "./vendor/wllama/index.js?v=20260823-15";
+import { Wllama } from "./vendor/wllama/index.js?v=20260823-16";
 import {
   QUERY_RESPONSE_SCHEMA,
   buildRepairPrompt,
@@ -57,27 +57,12 @@ async function loadModel() {
 
   loading = (async () => {
     self.postMessage({ type: "model-status", status: "starting", message: "Preparing the local model…" });
-    const webgpu = await canUseWebGPU();
-    const browser = browserName(navigator.userAgent);
-    const safari = browser === "Safari";
-    backend = webgpu ? "webgpu" : "cpu";
+    const safari = browserName(navigator.userAgent) === "Safari";
+    backend = "cpu";
     runtime = createRuntime(backend);
-    try {
-      await loadIntoRuntime(runtime, { backend, safari, reportProgress: true });
-    } catch (error) {
-      if (backend !== "webgpu" || !isBackendAbort(error)) throw withNativeLog(error);
-      backend = "cpu";
-      self.postMessage({
-        type: "model-status",
-        status: "fallback",
-        message: `${browser} stopped the WebGPU runtime during startup. Folio switched to the CPU runtime.`,
-      });
-      nativeLogs = [];
-      runtime = createRuntime(backend);
-      await loadIntoRuntime(runtime, { backend, safari, reportProgress: false }).catch((fallbackError) => {
-        throw withNativeLog(fallbackError);
-      });
-    }
+    await loadIntoRuntime(runtime, { backend, safari, reportProgress: true }).catch((error) => {
+      throw withNativeLog(error);
+    });
     const info = modelInfo();
     self.postMessage({ type: "model-status", status: "ready", message: "Local model ready", ...info });
     return info;
@@ -156,22 +141,12 @@ async function loadIntoRuntime(instance, { backend: selectedBackend, safari, rep
   });
 }
 
-async function canUseWebGPU() {
-  if (!self.isSecureContext || !navigator.gpu) return false;
-  const adapter = await navigator.gpu.requestAdapter({ powerPreference: "high-performance" }).catch(() => null);
-  return Boolean(adapter?.features.has("shader-f16"));
-}
-
 function browserName(userAgent) {
   if (/Edg\//i.test(userAgent)) return "Edge";
   if (/(Chrome|Chromium|CriOS)\//i.test(userAgent)) return "Chrome";
   if (/Firefox\//i.test(userAgent)) return "Firefox";
   if (/Safari\//i.test(userAgent)) return "Safari";
   return "This browser";
-}
-
-function isBackendAbort(error) {
-  return /abort|llama\.cpp|runtimeerror/i.test(`${error?.message || error}`);
 }
 
 function recordNativeLog(level, values) {

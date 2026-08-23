@@ -45,7 +45,7 @@ const elements = {
 };
 
 function WorkerClient(path, onEvent = () => {}) {
-  this.worker = new Worker(`${path}?v=20260823-15`, { type: "module" });
+  this.worker = new Worker(`${path}?v=20260823-16`, { type: "module" });
   this.nextId = 0;
   this.pending = new Map();
   this.worker.addEventListener("message", ({ data }) => {
@@ -450,13 +450,6 @@ function handleModelEvent(event) {
     elements.modelProgressBar.style.width = "100%";
     elements.modelStatus.textContent = "Starting the local model";
     elements.modelProgressCopy.textContent = "The download is complete. Folio is loading the model into memory.";
-  } else if (event.status === "fallback") {
-    elements.modelLoader.classList.add("loading");
-    elements.modelLoader.classList.remove("error");
-    elements.modelProgressBar.style.width = "100%";
-    elements.modelStatus.textContent = "Starting CPU compatibility";
-    elements.modelProgressCopy.textContent = "The model is downloaded. Folio is starting it with the CPU runtime.";
-    showRuntimeFallback(event.message);
   } else if (event.status === "thinking") {
     elements.modelStatus.textContent = "Writing PostgreSQL";
     elements.modelProgressCopy.textContent = "The model is working with this document's schema.";
@@ -469,10 +462,10 @@ async function checkBrowser() {
     elements.browserCheck.classList.toggle("ready", result.webgpuReady);
     elements.browserCheck.classList.toggle("fallback", !result.webgpuReady);
     elements.browserCheckTitle.textContent = result.webgpuReady
-      ? "WebGPU ready"
+      ? "WebGPU available"
       : "CPU compatibility ready";
     elements.browserCheckStatus.textContent = result.webgpuReady
-      ? `${result.browser} can run the local model on this GPU.`
+      ? `${result.browser} exposes GPU acceleration. Folio will use the CPU runtime.`
       : `${result.browser} can run the local model with the CPU runtime.`;
     elements.browserCheckGuidance.replaceChildren(
       ...result.guidance.map((instruction) => {
@@ -490,16 +483,6 @@ async function checkBrowser() {
     elements.browserCheckStatus.textContent = "Folio can start the local model with its CPU runtime.";
     elements.browserCheckGuidance.hidden = true;
   }
-}
-
-function showRuntimeFallback(message) {
-  elements.browserCheck.classList.remove("ready");
-  elements.browserCheck.classList.remove("needs-guidance");
-  elements.browserCheck.classList.add("fallback");
-  elements.browserCheckTitle.textContent = "CPU compatibility active";
-  elements.browserCheckStatus.textContent = message
-    || "This browser stopped the WebGPU runtime during startup. Folio switched to the CPU runtime.";
-  elements.browserCheckGuidance.hidden = true;
 }
 
 async function askFolio(event) {
