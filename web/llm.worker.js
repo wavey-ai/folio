@@ -4,10 +4,10 @@ import {
   buildRepairPrompt,
   buildSystemPrompt,
   validateProposal,
-} from "./assistant-context.js?v=20260823-19";
+} from "./assistant-context.js?v=20260823-21";
 
 const MODEL = {
-  repo: "LiquidAI/LFM2.5-230M-GGUF",
+  repo: "unsloth/Qwen3.5-0.8B-GGUF",
   quant: "Q4_K_M",
 };
 
@@ -18,6 +18,7 @@ let nativeLogs = [];
 
 self.addEventListener("message", async ({ data }) => {
   const { id, operation } = data;
+  emitModelEvent("request", { id, operation });
   try {
     let result;
     if (operation === "load") {
@@ -45,9 +46,16 @@ self.addEventListener("message", async ({ data }) => {
     } else {
       throw new Error(`Unknown language model operation: ${operation}`);
     }
+    emitModelEvent("request-complete", { id, operation });
     self.postMessage({ id, result });
   } catch (error) {
-    self.postMessage({ id, error: error.message });
+    emitModelEvent("request-error", {
+      id,
+      operation,
+      message: error.message,
+      nativeLogs: recentNativeLogs(),
+    }, "error");
+    self.postMessage({ id, error: error.message, output: error.output || "" });
   }
 });
 
@@ -56,6 +64,7 @@ async function loadModel() {
   if (loading) return loading;
 
   loading = (async () => {
+    emitModelEvent("load-start", { model: MODEL, backend });
     self.postMessage({ type: "model-status", status: "starting", message: "Preparing the local model…" });
     const safari = browserName(navigator.userAgent) === "Safari";
     backend = "cpu";
@@ -65,6 +74,7 @@ async function loadModel() {
     });
     const proof = await warmModel();
     const info = modelInfo();
+    emitModelEvent("load-ready", { ...info, proof });
     self.postMessage({
       type: "model-status",
       status: "ready",
@@ -84,18 +94,54 @@ async function loadModel() {
 
 async function warmModel() {
   self.postMessage({ type: "model-warmup", elapsedMs: 0 });
+  emitModelEvent("warmup-start", { prompt: "Hi", maxTokens: 64 });
   const response = await runtime.createChatCompletion({
     messages: [
-      { role: "system", content: "Reply with exactly: Hi" },
-      { role: "user", content: "Hi" },
+      { role: "system", content: "Reply with exactly: Hi /no_think" },
+      { role: "user", content: "Hi /no_think" },
     ],
-    max_tokens: 8,
+    chat_template_kwargs: { enable_thinking: false },
+    max_tokens: 64,
     temperature: 0,
     seed: 42,
   });
-  const reply = response.choices?.[0]?.message?.content?.trim();
-  if (!reply) throw new Error("The local model returned an empty warm-up response.");
+  let reply = completionText(response);
+  emitModelEvent("warmup-response", summarizeCompletion(response, reply));
+  if (!reply) {
+    emitModelEvent("warmup-retry", { reason: "Chat completion produced empty text." }, "warn");
+    const fallback = await runtime.createCompletion({
+      prompt: "Reply with exactly: Hi\nResponse:",
+      max_tokens: 16,
+      temperature: 0,
+      seed: 42,
+    });
+    reply = completionText(fallback);
+    emitModelEvent("warmup-fallback-response", summarizeCompletion(fallback, reply));
+  }
+  if (!reply) throw new Error("Warm-up produced empty text. See [Folio model] events in the console.");
   return reply.slice(0, 40);
+}
+
+function completionText(response) {
+  const choice = response?.choices?.[0];
+  const candidates = [
+    choice?.message?.content,
+    choice?.message?.reasoning_content,
+    choice?.text,
+  ];
+  return candidates.find((value) => typeof value === "string" && value.trim())?.trim() || "";
+}
+
+function summarizeCompletion(response, reply) {
+  const choice = response?.choices?.[0] || {};
+  return {
+    finishReason: choice.finish_reason || null,
+    contentLength: choice.message?.content?.length || 0,
+    reasoningLength: choice.message?.reasoning_content?.length || 0,
+    textLength: choice.text?.length || 0,
+    reply: reply.slice(0, 160),
+    usage: response?.usage || null,
+  };
 }
 
 function createRuntime(selectedBackend) {
@@ -132,6 +178,14 @@ function createRuntime(selectedBackend) {
 
 async function loadIntoRuntime(instance, { backend: selectedBackend, safari, reportProgress }) {
   let downloadComplete = false;
+  emitModelEvent("runtime-load-start", {
+    backend: selectedBackend,
+    contextSize: safari ? 4_096 : 8_192,
+    batchSize: safari ? 128 : 256,
+    hardwareConcurrency: navigator.hardwareConcurrency || 1,
+    crossOriginIsolated: self.crossOriginIsolated,
+    sharedArrayBuffer: typeof SharedArrayBuffer !== "undefined",
+  });
   await instance.loadModelFromHF(MODEL, {
     n_ctx: safari ? 4_096 : 8_192,
     n_batch: safari ? 128 : 256,
@@ -152,6 +206,7 @@ async function loadIntoRuntime(instance, { backend: selectedBackend, safari, rep
       }
       if (!downloadComplete && totalBytes > 0 && loadedBytes >= totalBytes) {
         downloadComplete = true;
+        emitModelEvent("download-complete", { loadedBytes, totalBytes });
         if (reportProgress) {
           self.postMessage({
             type: "model-status",
@@ -161,6 +216,11 @@ async function loadIntoRuntime(instance, { backend: selectedBackend, safari, rep
         }
       }
     },
+  });
+  emitModelEvent("runtime-load-complete", {
+    context: instance.getLoadedContextInfo(),
+    threads: instance.getNumThreads(),
+    multithread: instance.isMultithread(),
   });
 }
 
@@ -177,9 +237,21 @@ function recordNativeLog(level, values) {
   if (!message) return;
   nativeLogs.push({ level, message });
   nativeLogs = nativeLogs.slice(-30);
-  if (level === "warn" || level === "error") {
-    self.postMessage({ type: "model-log", level, message });
-  }
+  self.postMessage({ type: "model-log", level, message, at: new Date().toISOString() });
+}
+
+function recentNativeLogs() {
+  return nativeLogs.slice(-10);
+}
+
+function emitModelEvent(event, details = {}, level = "info") {
+  self.postMessage({
+    type: "model-event",
+    event,
+    level,
+    at: new Date().toISOString(),
+    details,
+  });
 }
 
 function formatLogValue(value) {
@@ -201,6 +273,12 @@ function withNativeLog(error) {
 }
 
 async function complete(messages) {
+  emitModelEvent("generation-start", {
+    messageCount: messages.length,
+    promptCharacters: messages.reduce((total, message) => total + message.content.length, 0),
+    maxTokens: outputTokenLimit(),
+    contextSize: runtime.getLoadedContextInfo().n_ctx,
+  });
   self.postMessage({ type: "model-status", status: "thinking", message: "Writing PostgreSQL…" });
   const startedAt = performance.now();
   self.postMessage({ type: "model-generation", characters: 0, elapsedMs: 0, sql: "" });
@@ -235,7 +313,8 @@ async function complete(messages) {
         type: "model-generation",
         characters: content.length,
         elapsedMs: Math.round(now - startedAt),
-        sql: extractPartialJsonString(content, "sql"),
+        sql: extractPartialJsonString(content, "sql") || extractSqlDraft(content),
+        raw: content,
       });
     }
   }
@@ -243,9 +322,15 @@ async function complete(messages) {
     type: "model-generation",
     characters: content.length,
     elapsedMs: Math.round(performance.now() - startedAt),
-    sql: extractPartialJsonString(content, "sql"),
+    sql: extractPartialJsonString(content, "sql") || extractSqlDraft(content),
+    raw: content,
   });
-  const proposal = validateProposal(JSON.parse(content));
+  const proposal = parseModelProposal(content);
+  emitModelEvent("generation-complete", {
+    outputCharacters: content.length,
+    usage,
+    sqlCharacters: proposal.sql.length,
+  });
   self.postMessage({
     type: "model-status",
     status: "ready",
@@ -253,6 +338,36 @@ async function complete(messages) {
     ...modelInfo(),
   });
   return { proposal, usage };
+}
+
+function parseModelProposal(content) {
+  try {
+    return validateProposal(JSON.parse(content));
+  } catch (jsonError) {
+    const sql = extractSqlDraft(content);
+    if (sql) {
+      return validateProposal({
+        sql,
+        answer: "Folio generated this PostgreSQL report.",
+        tables: [],
+        assumptions: ["The local model returned PostgreSQL directly."],
+      });
+    }
+    const error = new Error("The local model returned a response that Folio could not turn into PostgreSQL.");
+    error.output = content;
+    error.cause = jsonError;
+    throw error;
+  }
+}
+
+function extractSqlDraft(content) {
+  const fenced = content.match(/```(?:postgresql|sql)?\s*([\s\S]*?)(?:```|$)/i);
+  const source = fenced?.[1] || content;
+  const start = source.search(/\b(?:select|with)\b/i);
+  if (start < 0) return "";
+  const candidate = source.slice(start).trim();
+  const lastStatement = candidate.lastIndexOf(";");
+  return lastStatement >= 0 ? candidate.slice(0, lastStatement + 1) : candidate;
 }
 
 function outputTokenLimit() {
@@ -290,9 +405,11 @@ function extractPartialJsonString(json, key) {
 function modelInfo() {
   const context = runtime.getLoadedContextInfo();
   return {
-    model: "LFM2.5-230M Q4_K_M",
+    model: "Qwen3.5-0.8B Q4_K_M",
     contextSize: context.n_ctx,
     backend,
     webgpu: backend === "webgpu",
+    threads: runtime.getNumThreads(),
+    multithread: runtime.isMultithread(),
   };
 }

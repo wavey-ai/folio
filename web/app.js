@@ -1,4 +1,8 @@
-import { validateProposal, validateReadQuery } from "./assistant-context.js?v=20260823-19";
+import {
+  buildExternalModelPrompt,
+  validateProposal,
+  validateReadQuery,
+} from "./assistant-context.js?v=20260823-21";
 import { PgrustClient } from "./pgrust-client.js";
 
 const elements = {
@@ -41,12 +45,17 @@ const elements = {
   askForm: document.querySelector("#ask-form"),
   askInput: document.querySelector("#ask-input"),
   askButton: document.querySelector("#ask-button"),
+  ownModelButton: document.querySelector("#own-model-button"),
+  ownModelDialog: document.querySelector("#own-model-dialog"),
+  ownModelPrompt: document.querySelector("#own-model-prompt"),
+  copyOwnModelPrompt: document.querySelector("#copy-own-model-prompt"),
+  closeOwnModel: document.querySelector("#close-own-model"),
   assistantFlow: document.querySelector("#assistant-flow"),
   assistantAnswer: document.querySelector("#assistant-answer"),
 };
 
 function WorkerClient(path, onEvent = () => {}) {
-  this.worker = new Worker(`${path}?v=20260823-19`, { type: "module" });
+  this.worker = new Worker(`${path}?v=20260823-21`, { type: "module" });
   this.nextId = 0;
   this.pending = new Map();
   this.worker.addEventListener("message", ({ data }) => {
@@ -58,8 +67,11 @@ function WorkerClient(path, onEvent = () => {}) {
     if (!request) return;
     this.pending.delete(data.id);
     window.clearTimeout(request.timer);
-    if (data.error) request.reject(new Error(data.error));
-    else request.resolve(data.result);
+    if (data.error) {
+      const error = new Error(data.error);
+      error.output = data.output || "";
+      request.reject(error);
+    } else request.resolve(data.result);
   });
   this.worker.addEventListener("error", (error) => {
     for (const request of this.pending.values()) {
@@ -99,6 +111,7 @@ const state = {
   assistantBusy: false,
   assistantPhase: "idle",
   generationCharacters: 0,
+  modelRawResponse: "",
   postgresStatus: "",
   sqlSource: "wizard",
   sqlVersion: 0,
@@ -121,6 +134,13 @@ elements.modelLoadButton.addEventListener("click", () => {
   prepareModel().catch(() => {});
 });
 elements.askForm.addEventListener("submit", askFolio);
+elements.ownModelButton.addEventListener("click", prepareOwnModelPrompt);
+elements.closeOwnModel.addEventListener("click", () => elements.ownModelDialog.close());
+elements.copyOwnModelPrompt.addEventListener("click", async () => {
+  await navigator.clipboard.writeText(elements.ownModelPrompt.value);
+  elements.copyOwnModelPrompt.textContent = "Prompt copied";
+  window.setTimeout(() => { elements.copyOwnModelPrompt.textContent = "Copy prompt"; }, 1_400);
+});
 elements.sqlOutput.addEventListener("input", () => {
   state.sqlSource = "edited";
   state.sqlVersion += 1;
@@ -165,6 +185,7 @@ elements.copyButton.addEventListener("click", async () => {
 });
 
 elements.askButton.disabled = true;
+elements.ownModelButton.disabled = true;
 checkBrowser();
 await mapper.call("ready");
 elements.engineState.classList.add("ready");
@@ -249,6 +270,7 @@ function setPreparation(stage, message) {
   elements.workspace.setAttribute("aria-busy", String(busy));
   elements.documentStatus.textContent = message;
   elements.askButton.disabled = busy || state.assistantBusy;
+  elements.ownModelButton.disabled = busy;
 }
 
 function showPreparationError(error) {
@@ -257,6 +279,7 @@ function showPreparationError(error) {
   elements.documentPrep.setAttribute("aria-busy", "false");
   elements.workspace.setAttribute("aria-busy", "false");
   elements.askButton.disabled = state.assistantBusy || !state.catalog.length;
+  elements.ownModelButton.disabled = !state.catalog.length;
   elements.documentStatus.textContent = `Review this document's JSON or XML syntax. ${error.message}`;
 }
 
@@ -415,11 +438,11 @@ async function runEditableQuery() {
 }
 
 async function prepareModel() {
-  if (state.modelReady) return { model: "LFM2.5-230M Q4_K_M" };
+  if (state.modelReady) return { model: "Qwen3.5-0.8B Q4_K_M" };
   if (state.modelLoading) return state.modelLoading;
   elements.modelLoadButton.disabled = true;
   elements.modelStatus.textContent = "Preparing the local model";
-  elements.modelProgressCopy.textContent = "Starting the 153 MB download…";
+  elements.modelProgressCopy.textContent = "Starting the 533 MB download…";
   state.modelLoading = llm.call("load")
     .then((info) => {
       state.modelReady = true;
@@ -439,20 +462,34 @@ async function prepareModel() {
 }
 
 function handleModelEvent(event) {
+  if (event.type === "model-event") {
+    logModelEvent(event.level, event.event, event.details, event.at);
+    return;
+  }
+  if (event.type === "model-log") {
+    logModelEvent(event.level, "llama.cpp", { message: event.message }, event.at);
+    return;
+  }
   if (event.type === "model-warmup") {
     startModelWarmup(event.elapsedMs);
     return;
   }
   if (event.type === "model-generation") {
+    if (event.raw) state.modelRawResponse = event.raw;
     state.generationCharacters = Math.max(state.generationCharacters, event.characters || 0);
     const seconds = Math.max(1, Math.round(event.elapsedMs / 1_000));
     const writing = state.generationCharacters > 0;
+    const waiting = !writing && seconds >= 45;
     elements.modelStatus.textContent = writing
       ? `Writing PostgreSQL · ${seconds}s`
-      : `Reading the schema · ${seconds}s`;
+      : waiting
+        ? `Still reading the schema · ${seconds}s`
+        : `Reading the schema · ${seconds}s`;
     const generationStatus = writing
       ? `${state.generationCharacters} characters written.`
-      : "The model is preparing its first PostgreSQL token.";
+      : waiting
+        ? "Use your model for a faster result while the local query continues."
+        : "The model is preparing its first PostgreSQL token.";
     elements.modelProgressCopy.textContent = state.modelProof
       ? `The model replied “${state.modelProof}” · ${generationStatus}`
       : generationStatus;
@@ -461,10 +498,14 @@ function handleModelEvent(event) {
         ? `Repairing your query · ${seconds}s`
         : writing
           ? `Writing your query · ${seconds}s · ${state.generationCharacters} characters`
-          : `Reading your schema · ${seconds}s`;
+          : waiting
+            ? `Still reading your schema · ${seconds}s`
+            : `Reading your schema · ${seconds}s`;
       setAssistantMessage(writing
         ? `Writing PostgreSQL · ${seconds}s · ${state.generationCharacters} characters`
-        : `Reading the schema · ${seconds}s`);
+        : waiting
+          ? `Still reading the schema · ${seconds}s · Use your model for a faster result.`
+          : `Reading the schema · ${seconds}s`);
       if (event.sql) {
         elements.sqlOutput.value = event.sql;
         state.sqlSource = "assistant-stream";
@@ -512,6 +553,17 @@ function handleModelEvent(event) {
   }
 }
 
+function logModelEvent(level, event, details, at = new Date().toISOString()) {
+  const method = level === "error"
+    ? "error"
+    : level === "warn"
+      ? "warn"
+      : level === "debug"
+        ? "debug"
+        : "info";
+  console[method](`[Folio model] ${at} ${event}`, details);
+}
+
 function startModelWarmup(elapsedMs = 0) {
   if (!state.modelWarmupTimer) {
     state.modelWarmupStartedAt = performance.now() - elapsedMs;
@@ -556,17 +608,48 @@ async function runModelGeneration(operation, payload) {
   }
 }
 
+async function getAssistantContext(question) {
+  const matches = await search.call("contextSearch", { query: question });
+  const tableNames = matches.slice(0, 6).map((match) => match.id);
+  return dataStore.call("assistantContext", { tableNames, question });
+}
+
+async function prepareOwnModelPrompt() {
+  const question = elements.askInput.value.trim();
+  if (!question) {
+    elements.askInput.focus();
+    return;
+  }
+
+  elements.ownModelButton.disabled = true;
+  elements.ownModelButton.textContent = "Building prompt…";
+  try {
+    const context = await getAssistantContext(question);
+    elements.ownModelPrompt.value = buildExternalModelPrompt(context, question);
+    elements.ownModelDialog.showModal();
+    elements.ownModelPrompt.focus();
+    elements.ownModelPrompt.select();
+  } catch (error) {
+    setAssistantMessage(`Folio needs another pass at this prompt. ${error.message}`, true);
+  } finally {
+    elements.ownModelButton.disabled = !state.catalog.length;
+    elements.ownModelButton.textContent = "Use your model";
+  }
+}
+
 async function checkBrowser() {
   try {
-    const result = await capabilities.call("check");
-    elements.browserCheck.classList.toggle("ready", result.webgpuReady);
-    elements.browserCheck.classList.toggle("fallback", !result.webgpuReady);
-    elements.browserCheckTitle.textContent = result.webgpuReady
-      ? "WebGPU available"
-      : "CPU compatibility ready";
-    elements.browserCheckStatus.textContent = result.webgpuReady
-      ? `${result.browser} exposes GPU acceleration. Folio will use the CPU runtime.`
-      : `${result.browser} can run the local model with the CPU runtime.`;
+    const result = await capabilities.call("check", { isolated: window.crossOriginIsolated });
+    const threadsReady = result.isolated && result.sharedMemory;
+    const threads = Math.max(1, Math.floor(result.hardwareConcurrency / 2));
+    elements.browserCheck.classList.toggle("ready", threadsReady);
+    elements.browserCheck.classList.toggle("fallback", !threadsReady);
+    elements.browserCheckTitle.textContent = threadsReady
+      ? "CPU threads ready"
+      : "Single-thread CPU mode";
+    elements.browserCheckStatus.textContent = threadsReady
+      ? `${result.browser} can run the local model across ${threads} CPU threads.`
+      : `${result.browser} is running the local model on one CPU thread.`;
     elements.browserCheckGuidance.replaceChildren(
       ...result.guidance.map((instruction) => {
         const item = document.createElement("li");
@@ -597,6 +680,7 @@ async function askFolio(event) {
   state.assistantPhase = "schema";
   state.sqlSource = "assistant-stream";
   state.sqlVersion += 1;
+  state.modelRawResponse = "";
   elements.askButton.disabled = true;
   elements.runButton.disabled = true;
   elements.runButton.textContent = "Writing query…";
@@ -613,9 +697,7 @@ async function askFolio(event) {
   setAssistantMessage("Finding the tables and fields that match your question…");
 
   try {
-    const matches = await search.call("contextSearch", { query: question });
-    const tableNames = matches.slice(0, 6).map((match) => match.id);
-    const context = await dataStore.call("assistantContext", { tableNames, question });
+    const context = await getAssistantContext(question);
     completeAssistantStage("schema");
     setAssistantStage("plan");
     state.assistantPhase = "plan";
@@ -674,7 +756,7 @@ async function askFolio(event) {
     elements.builderTitle.textContent = elements.sqlOutput.value.trim()
       ? "Review this query draft"
       : "Query needs another pass";
-    setAssistantMessage(`Folio needs another pass at this question. ${error.message}`, true);
+    showAssistantFailure(error.message, error.output || state.modelRawResponse);
   } finally {
     state.assistantBusy = false;
     state.assistantPhase = "idle";
@@ -859,6 +941,17 @@ function setAssistantMessage(message, error = false) {
   elements.assistantAnswer.append(copy);
   elements.assistantAnswer.classList.toggle("error", error);
   elements.assistantAnswer.hidden = false;
+}
+
+function showAssistantFailure(message, modelResponse) {
+  setAssistantMessage(`Folio needs another pass at this question. ${message}`, true);
+  if (!modelResponse) return;
+  const heading = document.createElement("strong");
+  heading.textContent = "Model response";
+  const response = document.createElement("pre");
+  response.className = "assistant-model-response";
+  response.textContent = modelResponse;
+  elements.assistantAnswer.append(heading, response);
 }
 
 function friendlyName(value) {

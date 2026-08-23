@@ -2,13 +2,13 @@ self.addEventListener("message", async ({ data }) => {
   const { id, operation } = data;
   try {
     if (operation !== "check") throw new Error(`Unknown capability operation: ${operation}`);
-    self.postMessage({ id, result: await checkCapabilities() });
+    self.postMessage({ id, result: await checkCapabilities(data.isolated) });
   } catch (error) {
     self.postMessage({ id, error: error.message });
   }
 });
 
-async function checkCapabilities() {
+async function checkCapabilities(pageIsolated) {
   const userAgent = navigator.userAgent || "";
   const safariMatch = userAgent.match(/Version\/(\d+(?:\.\d+)?).*Safari\//i);
   const safari = Boolean(safariMatch) && !/(Chrome|Chromium|CriOS|Edg|OPR)\//i.test(userAgent);
@@ -21,20 +21,14 @@ async function checkCapabilities() {
   const shaderF16 = features.includes("shader-f16");
   const webgpuReady = secureContext && Boolean(adapter) && shaderF16;
   const guidance = [];
+  const sharedMemory = typeof SharedArrayBuffer !== "undefined";
+  const isolated = Boolean(pageIsolated ?? self.crossOriginIsolated);
 
   if (!secureContext) {
     guidance.push("Open Folio with HTTPS or from localhost.");
   }
-  if (secureContext && !webgpuApi && safari) {
-    guidance.push("Open Safari Settings, then Advanced, and show features for web developers.");
-    guidance.push("Open Develop, then Feature Flags, and turn on WebGPU.");
-    guidance.push("Restart Safari, then open Folio again.");
-  } else if (secureContext && !webgpuApi) {
-    guidance.push("Use a current browser with WebGPU support.");
-  } else if (webgpuApi && !adapter) {
-    guidance.push("Restart the browser so it can connect to the GPU.");
-  } else if (adapter && !shaderF16) {
-    guidance.push("Update the browser to enable 16-bit GPU shaders.");
+  if (secureContext && (!isolated || !sharedMemory)) {
+    guidance.push("Start Folio with node scripts/serve-web.mjs, then reload this page.");
   }
 
   return {
@@ -46,8 +40,10 @@ async function checkCapabilities() {
     shaderF16,
     webgpuReady,
     features,
-    sharedMemory: typeof SharedArrayBuffer !== "undefined",
-    recommendedBackend: webgpuReady ? "webgpu" : "cpu",
+    sharedMemory,
+    isolated,
+    hardwareConcurrency: navigator.hardwareConcurrency || 1,
+    recommendedBackend: "cpu",
     guidance,
   };
 }

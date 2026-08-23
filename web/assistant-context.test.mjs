@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 
 import {
+  buildExternalModelPrompt,
   buildRepairPrompt,
   buildSystemPrompt,
   validateProposal,
@@ -19,6 +20,14 @@ test("system prompt explains records and structural joins", () => {
   assert.match(prompt, /child\.parent_id = parent\.id/);
   assert.match(prompt, /max\(value\) FILTER/);
   assert.match(prompt, /report__customers/);
+});
+
+test("external model prompt includes the question and schema", () => {
+  const prompt = buildExternalModelPrompt(context, "Show customer spend");
+
+  assert.match(prompt, /Show customer spend/);
+  assert.match(prompt, /report__customers/);
+  assert.match(prompt, /Return only the PostgreSQL query/);
 });
 
 test("query validator accepts a relationship report", () => {

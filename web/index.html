@@ -10,7 +10,7 @@
       content="Turn JSON and XML documents into fully traversable schemas and PostgreSQL reports."
     />
     <title>Folio Studio</title>
-    <link rel="stylesheet" href="./styles.css?v=20260823-19" />
+    <link rel="stylesheet" href="./styles.css?v=20260823-21" />
   </head>
   <body>
     <header class="topbar">
@@ -59,13 +59,13 @@
             <h2 id="ask-title">Ask Folio</h2>
             <p>Describe the report you want. Folio will find the schema, write PostgreSQL, and check the query.</p>
           </div>
-          <span class="model-badge">LFM2.5 · 230M · Q4</span>
+          <span class="model-badge">Qwen3.5 · 0.8B · Q4</span>
         </div>
 
         <div class="model-loader" id="model-loader">
           <div class="model-loader-copy">
             <strong id="model-status">Local model available</strong>
-            <span id="model-progress-copy">The first use downloads about 153 MB. Your browser saves it for later.</span>
+            <span id="model-progress-copy">The first use downloads about 533 MB. Your browser saves it for later.</span>
           </div>
           <div class="model-progress" aria-hidden="true">
             <i id="model-progress-bar"></i>
@@ -88,7 +88,10 @@
               id="ask-input"
               rows="2"
             >Which proteins participate in reactions across the greatest number of distinct pathways? Show each protein's name, pathway count, reaction count, and pathway names. Include proteins found in at least three pathways and sort by pathway count.</textarea>
-            <button class="primary-button" id="ask-button" type="submit">Write query</button>
+            <div class="ask-actions">
+              <button class="primary-button" id="ask-button" type="submit">Write query</button>
+              <button class="secondary-button" id="own-model-button" type="button">Use your model</button>
+            </div>
           </div>
         </form>
 
@@ -103,6 +106,21 @@
         </div>
         <div class="assistant-answer" id="assistant-answer" hidden></div>
       </section>
+
+      <dialog class="own-model-dialog" id="own-model-dialog">
+        <div class="dialog-heading">
+          <div>
+            <p class="panel-kicker">Use your model</p>
+            <h2>Copy this prompt</h2>
+          </div>
+          <button class="text-button compact" id="close-own-model" type="button">Close</button>
+        </div>
+        <p>Paste this prompt into ChatGPT, Claude, or another model. Then paste its PostgreSQL into the editable query below.</p>
+        <textarea id="own-model-prompt" rows="18" spellcheck="false" aria-label="Prompt for your model"></textarea>
+        <div class="dialog-actions">
+          <button class="primary-button" id="copy-own-model-prompt" type="button">Copy prompt</button>
+        </div>
+      </dialog>
 
       <section class="workspace" id="workspace" aria-label="Document query workspace">
         <aside class="schema-panel panel" aria-labelledby="schema-title">
@@ -272,6 +290,6 @@ JOIN nodes AS parent
       </button>
     </template>
 
-    <script type="module" src="./app.js?v=20260823-19"></script>
+    <script type="module" src="./app.js?v=20260823-21"></script>
   </body>
 </html>

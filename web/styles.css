@@ -554,6 +554,16 @@ p {
   align-items: stretch;
 }
 
+.ask-actions {
+  display: flex;
+  gap: 10px;
+  align-items: stretch;
+}
+
+.ask-actions button {
+  white-space: nowrap;
+}
+
 .ask-control textarea {
   width: 100%;
   min-height: 58px;
@@ -569,6 +579,59 @@ p {
 
 .ask-control .primary-button {
   min-width: 112px;
+}
+
+.own-model-dialog {
+  width: min(760px, calc(100vw - 32px));
+  padding: 24px;
+  border: 1px solid var(--line-strong);
+  border-radius: 18px;
+  color: var(--ink);
+  background: var(--paper);
+  box-shadow: 0 24px 80px rgb(46 35 24 / 28%);
+}
+
+.own-model-dialog::backdrop {
+  background: rgb(46 35 24 / 52%);
+  backdrop-filter: blur(3px);
+}
+
+.dialog-heading,
+.dialog-actions {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 16px;
+}
+
+.dialog-heading h2 {
+  margin: 2px 0 0;
+  font-family: Georgia, serif;
+  font-size: 24px;
+}
+
+.own-model-dialog > p {
+  margin: 16px 0 12px;
+  color: var(--muted);
+  font-size: 13px;
+  line-height: 1.5;
+}
+
+.own-model-dialog textarea {
+  width: 100%;
+  min-height: 360px;
+  padding: 14px;
+  resize: vertical;
+  border: 1px solid var(--line-strong);
+  border-radius: 11px;
+  color: var(--ink);
+  background: #fffaf0;
+  font: 12px/1.55 "DM Mono", monospace;
+}
+
+.dialog-actions {
+  justify-content: flex-end;
+  margin-top: 14px;
 }
 
 .assistant-flow {
@@ -611,6 +674,19 @@ p {
   background: rgb(77 101 75 / 8%);
   font-size: 12px;
   line-height: 1.55;
+}
+
+.assistant-model-response {
+  max-height: 280px;
+  margin: 9px 0 0;
+  padding: 12px;
+  overflow: auto;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  color: var(--ink);
+  background: #fffaf0;
+  white-space: pre-wrap;
+  font: 11px/1.5 "DM Mono", monospace;
 }
 
 .workspace {
@@ -1156,6 +1232,14 @@ input[type="text"] {
 }
 
 @media (max-width: 760px) {
+  .ask-actions {
+    flex-wrap: wrap;
+  }
+
+  .ask-actions button {
+    flex: 1 1 140px;
+  }
+
   .topbar,
   main,
   .site-footer {

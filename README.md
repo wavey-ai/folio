@@ -75,10 +75,10 @@ wasm-pack build --target web --out-dir web/pkg \
   --no-default-features --features wasm
 ```
 
-Start a local web server from the repository root:
+Start the local web server from the repository root:
 
 ```sh
-python3 -m http.server 8000
+node scripts/serve-web.mjs
 ```
 
 Open `http://localhost:8000/web/`.
