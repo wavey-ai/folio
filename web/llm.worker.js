@@ -1,4 +1,4 @@
-import { Wllama } from "./vendor/wllama/index.js?v=20260823-7";
+import { Wllama } from "./vendor/wllama/index.js?v=20260823-8";
 import {
   QUERY_RESPONSE_SCHEMA,
   buildRepairPrompt,
@@ -75,6 +75,10 @@ async function loadModel() {
         },
       },
     );
+    runtime.setCompat({
+      wasm: new URL("./vendor/wllama/wllama-compat.wasm", import.meta.url).href,
+      worker: new URL("./vendor/wllama/wllama-compat.js", import.meta.url).href,
+    });
     const webgpu = runtime.isSupportWebGPU();
     await runtime.loadModelFromHF(MODEL, {
       n_ctx: 8_192,
@@ -84,11 +88,13 @@ async function loadModel() {
       cache_type_v: "q8_0",
       useCache: true,
       progressCallback: ({ loaded, total }) => {
+        const loadedBytes = Number(loaded);
+        const totalBytes = Number(total);
         self.postMessage({
           type: "model-progress",
-          loaded,
-          total,
-          percent: total ? Math.round((loaded / total) * 100) : 0,
+          loaded: loadedBytes,
+          total: totalBytes,
+          percent: totalBytes ? Math.round((loadedBytes / totalBytes) * 100) : 0,
         });
       },
     });
