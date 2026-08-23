@@ -1,4 +1,4 @@
-import { Wllama } from "./vendor/wllama/index.js";
+import { Wllama } from "./vendor/wllama/index.js?v=20260823-7";
 import {
   QUERY_RESPONSE_SCHEMA,
   buildRepairPrompt,

@@ -41,7 +41,7 @@ const elements = {
 };
 
 function WorkerClient(path, onEvent = () => {}) {
-  this.worker = new Worker(`${path}?v=20260823-6`, { type: "module" });
+  this.worker = new Worker(`${path}?v=20260823-7`, { type: "module" });
   this.nextId = 0;
   this.pending = new Map();
   this.worker.addEventListener("message", ({ data }) => {
@@ -105,7 +105,9 @@ const search = new WorkerClient("./search.worker.js");
 const llm = new WorkerClient("./llm.worker.js", handleModelEvent);
 const postgres = new PgrustClient(handlePostgresEvent);
 
-elements.modelLoadButton.addEventListener("click", () => prepareModel());
+elements.modelLoadButton.addEventListener("click", () => {
+  prepareModel().catch(() => {});
+});
 elements.askForm.addEventListener("submit", askFolio);
 elements.sqlOutput.addEventListener("input", () => {
   state.sqlSource = "edited";
