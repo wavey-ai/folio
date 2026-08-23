@@ -48,13 +48,15 @@ body {
 
 button,
 input,
-select {
+select,
+textarea {
   font: inherit;
 }
 
 button,
 select,
 input,
+textarea,
 .file-control {
   transition: border-color 160ms ease, box-shadow 160ms ease, transform 160ms ease;
 }
@@ -62,6 +64,7 @@ input,
 button:focus-visible,
 select:focus-visible,
 input:focus-visible,
+textarea:focus-visible,
 .file-control:focus-within {
   outline: 3px solid rgb(77 101 75 / 22%);
   outline-offset: 2px;
@@ -361,6 +364,191 @@ p {
   margin: 12px 0 0;
   color: var(--muted);
   font-size: 11px;
+}
+
+.ask-panel {
+  margin: 0 0 24px;
+  padding: 25px 27px;
+  border: 1px solid var(--line-strong);
+  border-radius: 20px;
+  background: rgb(248 241 227 / 92%);
+  box-shadow: var(--shadow);
+}
+
+.ask-heading {
+  display: flex;
+  justify-content: space-between;
+  gap: 24px;
+  align-items: flex-start;
+}
+
+.ask-heading h2 {
+  margin: 0 0 7px;
+  font-size: 25px;
+  letter-spacing: -0.04em;
+}
+
+.ask-heading > div > p:last-child {
+  margin: 0;
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.model-badge {
+  flex: 0 0 auto;
+  padding: 7px 10px;
+  border: 1px solid var(--line);
+  border-radius: 20px;
+  color: var(--leaf-dark);
+  background: var(--leaf-soft);
+  font: 500 9px "DM Mono", monospace;
+  letter-spacing: 0.03em;
+  text-transform: uppercase;
+}
+
+.model-loader {
+  display: grid;
+  grid-template-columns: minmax(240px, 0.85fr) minmax(180px, 1.15fr) auto;
+  gap: 18px;
+  align-items: center;
+  margin-top: 20px;
+  padding: 13px 15px;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  background: #f2eadb;
+}
+
+.model-loader.ready {
+  border-color: rgb(77 101 75 / 45%);
+  background: var(--leaf-soft);
+}
+
+.model-loader-copy strong,
+.model-loader-copy span {
+  display: block;
+}
+
+.model-loader-copy strong {
+  font-size: 11px;
+}
+
+.model-loader-copy span {
+  margin-top: 4px;
+  color: var(--muted);
+  font-size: 9px;
+}
+
+.model-progress {
+  height: 7px;
+  overflow: hidden;
+  border-radius: 7px;
+  background: rgb(117 106 91 / 16%);
+}
+
+.model-progress i {
+  width: 0;
+  height: 100%;
+  display: block;
+  border-radius: inherit;
+  background: var(--leaf);
+  transition: width 180ms ease;
+}
+
+.secondary-button {
+  min-height: 34px;
+  padding: 0 13px;
+  border: 1px solid var(--line-strong);
+  border-radius: 9px;
+  color: var(--ink);
+  background: var(--panel);
+  cursor: pointer;
+  font-size: 10px;
+  font-weight: 700;
+}
+
+.secondary-button:hover {
+  border-color: var(--leaf);
+  color: var(--leaf-dark);
+}
+
+.ask-form {
+  margin-top: 20px;
+}
+
+.ask-form > label {
+  display: block;
+  margin-bottom: 8px;
+  color: var(--muted);
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+.ask-control {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  gap: 10px;
+  align-items: stretch;
+}
+
+.ask-control textarea {
+  width: 100%;
+  min-height: 58px;
+  padding: 12px 14px;
+  resize: vertical;
+  border: 1px solid var(--line-strong);
+  border-radius: 11px;
+  color: var(--ink);
+  background: #fffaf0;
+  font-size: 13px;
+  line-height: 1.45;
+}
+
+.ask-control .primary-button {
+  min-width: 112px;
+}
+
+.assistant-flow {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 15px;
+  color: var(--muted);
+  font: 500 9px "DM Mono", monospace;
+  text-transform: uppercase;
+}
+
+.assistant-flow span {
+  padding: 5px 7px;
+  border-radius: 6px;
+}
+
+.assistant-flow span.active {
+  color: var(--coral-dark);
+  background: rgb(140 64 52 / 10%);
+}
+
+.assistant-flow span.complete {
+  color: var(--leaf-dark);
+  background: var(--leaf-soft);
+}
+
+.assistant-flow i {
+  color: var(--line-strong);
+  font-style: normal;
+}
+
+.assistant-answer {
+  margin-top: 15px;
+  padding: 13px 15px;
+  border-left: 4px solid var(--leaf);
+  border-radius: 8px;
+  color: var(--ink);
+  background: rgb(77 101 75 / 8%);
+  font-size: 12px;
+  line-height: 1.55;
 }
 
 .workspace {
@@ -667,17 +855,97 @@ input[type="text"] {
   grid-template-columns: 1.1fr 1fr 1fr;
 }
 
-.sql-block pre {
+.sql-block textarea {
+  width: 100%;
   min-height: 164px;
   max-height: 240px;
   margin: 0;
   padding: 17px;
   overflow: auto;
+  resize: vertical;
+  border: 0;
   border-radius: 13px;
   color: #eee6d7;
   background: var(--code);
   font: 400 10.5px/1.65 "DM Mono", monospace;
   tab-size: 4;
+}
+
+.schema-guide {
+  margin: 28px 0 38px;
+  padding: 28px;
+  border-top: 1px solid var(--line-strong);
+  border-bottom: 1px solid var(--line-strong);
+  background: rgb(248 241 227 / 46%);
+}
+
+.schema-guide h2 {
+  margin: 0 0 10px;
+  font-size: 24px;
+  letter-spacing: -0.04em;
+}
+
+.schema-guide > div:first-child > p:last-child {
+  max-width: 720px;
+  margin-bottom: 0;
+  color: var(--muted);
+  font-size: 12px;
+  line-height: 1.6;
+}
+
+.schema-guide code {
+  font-family: "DM Mono", monospace;
+}
+
+.schema-columns {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 1px;
+  margin: 24px 0;
+  border: 1px solid var(--line);
+  background: var(--line);
+}
+
+.schema-columns div {
+  padding: 13px 15px;
+  background: var(--panel);
+}
+
+.schema-columns dt {
+  color: var(--leaf-dark);
+  font: 500 11px "DM Mono", monospace;
+}
+
+.schema-columns dd {
+  margin: 5px 0 0;
+  color: var(--muted);
+  font-size: 10px;
+}
+
+.schema-patterns {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 18px;
+}
+
+.schema-patterns strong {
+  display: block;
+  margin-bottom: 8px;
+  color: var(--muted);
+  font-size: 9px;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+}
+
+.schema-patterns pre {
+  min-height: 126px;
+  margin: 0;
+  padding: 15px;
+  overflow: auto;
+  border-radius: 10px;
+  color: #eee6d7;
+  background: var(--code);
+  font: 400 10px/1.6 "DM Mono", monospace;
 }
 
 .result-panel {
@@ -858,6 +1126,25 @@ input[type="text"] {
     display: block;
   }
 
+  .ask-heading {
+    display: block;
+  }
+
+  .model-badge {
+    display: inline-block;
+    margin-top: 14px;
+  }
+
+  .model-loader,
+  .ask-control,
+  .schema-patterns {
+    grid-template-columns: 1fr;
+  }
+
+  .schema-columns {
+    grid-template-columns: 1fr 1fr;
+  }
+
   .panel {
     min-height: auto;
     padding: 22px;
@@ -877,7 +1164,7 @@ input[type="text"] {
     grid-template-columns: 1fr;
   }
 
-  .sql-block pre {
+  .sql-block textarea {
     max-height: 320px;
   }
 

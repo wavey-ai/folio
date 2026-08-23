@@ -10,7 +10,7 @@
       content="Turn JSON and XML documents into fully traversable schemas and PostgreSQL reports."
     />
     <title>Folio Studio</title>
-    <link rel="stylesheet" href="./styles.css?v=20260823-5" />
+    <link rel="stylesheet" href="./styles.css?v=20260823-6" />
   </head>
   <body>
     <header class="topbar">
@@ -50,6 +50,51 @@
           </div>
           <p id="document-status" role="status">Preparing the pathway document…</p>
         </div>
+      </section>
+
+      <section class="ask-panel" aria-labelledby="ask-title">
+        <div class="ask-heading">
+          <div>
+            <p class="panel-kicker">Local query assistant</p>
+            <h2 id="ask-title">Ask Folio</h2>
+            <p>Describe the report you want. Folio will find the schema, write PostgreSQL, and check the query.</p>
+          </div>
+          <span class="model-badge">Qwen3.5 · 0.8B · Q4</span>
+        </div>
+
+        <div class="model-loader" id="model-loader">
+          <div class="model-loader-copy">
+            <strong id="model-status">Local model available</strong>
+            <span id="model-progress-copy">The first use downloads about 530 MB. Your browser saves it for later.</span>
+          </div>
+          <div class="model-progress" aria-hidden="true">
+            <i id="model-progress-bar"></i>
+          </div>
+          <button class="secondary-button" id="model-load-button" type="button">Prepare local model</button>
+        </div>
+
+        <form class="ask-form" id="ask-form">
+          <label for="ask-input">What do you want to know?</label>
+          <div class="ask-control">
+            <textarea
+              id="ask-input"
+              rows="2"
+              placeholder="Which pathways are direct components of Programmed Cell Death?"
+            ></textarea>
+            <button class="primary-button" id="ask-button" type="submit">Write query</button>
+          </div>
+        </form>
+
+        <div class="assistant-flow" id="assistant-flow" aria-live="polite">
+          <span data-assistant-stage="schema">Find schema</span>
+          <i aria-hidden="true">→</i>
+          <span data-assistant-stage="plan">Plan query</span>
+          <i aria-hidden="true">→</i>
+          <span data-assistant-stage="check">Check PostgreSQL</span>
+          <i aria-hidden="true">→</i>
+          <span data-assistant-stage="repair">Repair</span>
+        </div>
+        <div class="assistant-answer" id="assistant-answer" hidden></div>
       </section>
 
       <section class="workspace" id="workspace" aria-label="Document query workspace">
@@ -130,7 +175,12 @@
               <span>Generated PostgreSQL</span>
               <button class="text-button compact" id="copy-button" type="button">Copy SQL</button>
             </div>
-            <pre><code id="sql-output"></code></pre>
+            <textarea
+              id="sql-output"
+              rows="18"
+              spellcheck="false"
+              aria-label="Editable PostgreSQL query"
+            ></textarea>
           </div>
         </section>
 
@@ -149,6 +199,42 @@
             </div>
           </div>
         </section>
+      </section>
+
+      <section class="schema-guide" aria-labelledby="schema-guide-title">
+        <div>
+          <p class="panel-kicker">One schema for every document</p>
+          <h2 id="schema-guide-title">How Folio stores your document</h2>
+          <p>
+            Every scalar value becomes one row in <code>nodes</code>. Rows with the same
+            <code>name</code> and <code>id</code> form one inferred record.
+          </p>
+        </div>
+        <dl class="schema-columns">
+          <div><dt>id</dt><dd>Identifies one inferred record.</dd></div>
+          <div><dt>parent_id</dt><dd>Connects a child record to its container.</dd></div>
+          <div><dt>name</dt><dd>Names the inferred table.</dd></div>
+          <div><dt>path</dt><dd>Names the scalar field.</dd></div>
+          <div><dt>data_type</dt><dd>Records string, number, or boolean.</dd></div>
+          <div><dt>value</dt><dd>Contains the scalar value as text.</dd></div>
+        </dl>
+        <div class="schema-patterns">
+          <div>
+            <strong>Build a record</strong>
+            <pre><code>SELECT id, parent_id,
+  max(value) FILTER (WHERE path = 'name') AS name
+FROM nodes
+WHERE name = 'document__items'
+GROUP BY id, parent_id;</code></pre>
+          </div>
+          <div>
+            <strong>Follow the document structure</strong>
+            <pre><code>SELECT child.value, parent.value
+FROM nodes AS child
+JOIN nodes AS parent
+  ON child.parent_id = parent.id;</code></pre>
+          </div>
+        </div>
       </section>
     </main>
 
@@ -179,6 +265,6 @@
       </button>
     </template>
 
-    <script type="module" src="./app.js?v=20260823-5"></script>
+    <script type="module" src="./app.js?v=20260823-6"></script>
   </body>
 </html>

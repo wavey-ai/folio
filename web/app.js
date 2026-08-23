@@ -1,3 +1,6 @@
+import { validateProposal, validateReadQuery } from "./assistant-context.js";
+import { PgrustClient } from "./pgrust-client.js";
+
 const elements = {
   engineState: document.querySelector("#engine-state"),
   fileInput: document.querySelector("#file-input"),
@@ -25,13 +28,27 @@ const elements = {
   resultWrap: document.querySelector("#result-wrap"),
   rowCount: document.querySelector("#row-count"),
   tableTemplate: document.querySelector("#table-template"),
+  modelLoader: document.querySelector("#model-loader"),
+  modelStatus: document.querySelector("#model-status"),
+  modelProgressCopy: document.querySelector("#model-progress-copy"),
+  modelProgressBar: document.querySelector("#model-progress-bar"),
+  modelLoadButton: document.querySelector("#model-load-button"),
+  askForm: document.querySelector("#ask-form"),
+  askInput: document.querySelector("#ask-input"),
+  askButton: document.querySelector("#ask-button"),
+  assistantFlow: document.querySelector("#assistant-flow"),
+  assistantAnswer: document.querySelector("#assistant-answer"),
 };
 
-function WorkerClient(path) {
-  this.worker = new Worker(`${path}?v=20260823-5`, { type: "module" });
+function WorkerClient(path, onEvent = () => {}) {
+  this.worker = new Worker(`${path}?v=20260823-6`, { type: "module" });
   this.nextId = 0;
   this.pending = new Map();
   this.worker.addEventListener("message", ({ data }) => {
+    if (data.id === undefined || data.id === null) {
+      onEvent(data);
+      return;
+    }
     const request = this.pending.get(data.id);
     if (!request) return;
     this.pending.delete(data.id);
@@ -50,11 +67,12 @@ function WorkerClient(path) {
 
 WorkerClient.prototype.call = function call(operation, payload = {}, transfer = []) {
   const id = ++this.nextId;
+  const longOperation = operation === "load" || operation === "ask" || operation === "repair";
   return new Promise((resolve, reject) => {
     const timer = window.setTimeout(() => {
       this.pending.delete(id);
-      reject(new Error(`${operation} took longer than two minutes.`));
-    }, 120_000);
+      reject(new Error(`${operation} took longer than ${longOperation ? "30 minutes" : "two minutes"}.`));
+    }, longOperation ? 1_800_000 : 120_000);
     this.pending.set(id, { resolve, reject, timer });
     this.worker.postMessage({ id, operation, ...payload }, transfer);
   });
@@ -64,6 +82,15 @@ const state = {
   catalog: [],
   visibleTables: [],
   searchVersion: 0,
+  documentGeneration: 0,
+  postgresReadyGeneration: 0,
+  postgresLoading: null,
+  leafCount: 0,
+  modelReady: false,
+  modelLoading: null,
+  assistantBusy: false,
+  sqlSource: "wizard",
+  sqlVersion: 0,
   plan: {
     table: "",
     operation: "rows",
@@ -75,12 +102,15 @@ const state = {
 const mapper = new WorkerClient("./mapper.worker.js");
 const dataStore = new WorkerClient("./data.worker.js");
 const search = new WorkerClient("./search.worker.js");
+const llm = new WorkerClient("./llm.worker.js", handleModelEvent);
+const postgres = new PgrustClient(handlePostgresEvent);
 
-await mapper.call("ready");
-elements.engineState.classList.add("ready");
-elements.engineState.querySelector("strong").textContent = "Ready in this browser";
-await loadReactomeSample();
-
+elements.modelLoadButton.addEventListener("click", () => prepareModel());
+elements.askForm.addEventListener("submit", askFolio);
+elements.sqlOutput.addEventListener("input", () => {
+  state.sqlSource = "edited";
+  state.sqlVersion += 1;
+});
 elements.reactomeButton.addEventListener("click", loadReactomeSample);
 elements.tableSearch.addEventListener("input", searchTables);
 elements.fileInput.addEventListener("change", async (event) => {
@@ -97,7 +127,6 @@ elements.fileInput.addEventListener("change", async (event) => {
     showPreparationError(error);
   }
 });
-
 elements.tableSelect.addEventListener("change", () => selectTable(elements.tableSelect.value));
 elements.operationSelect.addEventListener("change", () => {
   state.plan.operation = elements.operationSelect.value;
@@ -111,12 +140,18 @@ elements.clearFilter.addEventListener("click", () => {
   elements.filterValue.value = "";
   updateFilter();
 });
-elements.runButton.addEventListener("click", renderResult);
+elements.runButton.addEventListener("click", runCurrentQuery);
 elements.copyButton.addEventListener("click", async () => {
-  await navigator.clipboard.writeText(elements.sqlOutput.textContent);
+  await navigator.clipboard.writeText(elements.sqlOutput.value);
   elements.copyButton.textContent = "Copied";
   window.setTimeout(() => { elements.copyButton.textContent = "Copy SQL"; }, 1400);
 });
+
+elements.askButton.disabled = true;
+await mapper.call("ready");
+elements.engineState.classList.add("ready");
+elements.engineState.querySelector("strong").textContent = "Ready in this browser";
+await loadReactomeSample();
 
 async function loadReactomeSample() {
   setPreparation("read", "Reading 30 MB of Reactome pathways…");
@@ -135,11 +170,17 @@ async function loadReactomeSample() {
 }
 
 async function openDocument(source, buffer, format, label) {
+  const generation = ++state.documentGeneration;
+  state.postgresReadyGeneration = 0;
+  state.postgresLoading = null;
   setPreparation("map", "Mapping the document structure…");
   const mapped = await mapper.call("map", { source, format, buffer }, [buffer]);
+  if (generation !== state.documentGeneration) return;
   setPreparation("catalog", "Building queryable tables…");
-  const result = await dataStore.call("load", { buffer: mapped }, [mapped]);
+  const result = await dataStore.call("load", { buffer: mapped, label }, [mapped]);
+  if (generation !== state.documentGeneration) return;
   state.catalog = result.catalog;
+  state.leafCount = result.leafCount;
   state.visibleTables = state.catalog;
   const pathwayTable = state.catalog.find(
     (table) => table.name === "reactome_pathways__bp:pathway",
@@ -149,12 +190,14 @@ async function openDocument(source, buffer, format, label) {
   state.plan.fields = table?.fields.map((field) => field.name) || [];
   state.plan.operation = configureRelationshipReport(Boolean(pathwayTable));
   state.plan.filter = { field: "", operator: "equals", value: "" };
+  state.sqlSource = "wizard";
   elements.tableSearch.value = "";
   setPreparation("index", "Indexing elements and fields…");
   await search.call("load", { catalog: state.catalog });
+  if (generation !== state.documentGeneration) return;
   renderSchema();
   renderPlanner();
-  await renderResult();
+  await renderWizardResult();
   setPreparation(
     "ready",
     `${label} has ${state.catalog.length} tables and ${result.valueCount} values.`,
@@ -186,6 +229,7 @@ function setPreparation(stage, message) {
   elements.documentPrep.setAttribute("aria-busy", String(busy));
   elements.workspace.setAttribute("aria-busy", String(busy));
   elements.documentStatus.textContent = message;
+  elements.askButton.disabled = busy || state.assistantBusy;
 }
 
 function showPreparationError(error) {
@@ -193,6 +237,7 @@ function showPreparationError(error) {
   active?.classList.add("error");
   elements.documentPrep.setAttribute("aria-busy", "false");
   elements.workspace.setAttribute("aria-busy", "false");
+  elements.askButton.disabled = state.assistantBusy || !state.catalog.length;
   elements.documentStatus.textContent = `Review this document's JSON or XML syntax. ${error.message}`;
 }
 
@@ -308,40 +353,314 @@ function updateFilter() {
 }
 
 async function updateSql() {
-  elements.sqlOutput.textContent = await dataStore.call("sql", { plan: state.plan });
+  const version = ++state.sqlVersion;
+  const sql = await dataStore.call("sql", { plan: state.plan });
+  if (version !== state.sqlVersion) return;
+  elements.sqlOutput.value = sql;
+  state.sqlSource = "wizard";
 }
 
-async function renderResult() {
+async function runCurrentQuery() {
+  elements.runButton.disabled = true;
+  try {
+    if (state.sqlSource === "wizard") await renderWizardResult();
+    else await runEditableQuery();
+  } catch (error) {
+    renderQueryError(error.message);
+  } finally {
+    elements.runButton.disabled = false;
+  }
+}
+
+async function renderWizardResult() {
   const result = await dataStore.call("preview", { plan: state.plan });
-  elements.rowCount.textContent = `${result.rows.length} ${result.rows.length === 1 ? "row" : "rows"}`;
-  if (!result.rows.length) {
-    elements.resultWrap.innerHTML = `
-      <div class="empty-result">
-        <span aria-hidden="true">◇</span>
-        <p>This query returned zero rows. Adjust the filter and run it again.</p>
-      </div>`;
+  renderTableResult(
+    result.columns,
+    result.rows.map((row) => result.columns.map((column) => row[column])),
+  );
+}
+
+async function runEditableQuery() {
+  const sql = validateReadQuery(elements.sqlOutput.value);
+  setAssistantMessage("Preparing this document for PostgreSQL…");
+  await ensurePostgresData();
+  const result = await postgres.exec(sql);
+  if (result.kind === "error") throw new Error(result.text);
+  renderPostgresResult(result);
+  setAssistantMessage("The edited query passed PostgreSQL and produced the result below.");
+}
+
+async function prepareModel() {
+  if (state.modelReady) return { model: "Qwen3.5-0.8B Q4_K_M" };
+  if (state.modelLoading) return state.modelLoading;
+  elements.modelLoadButton.disabled = true;
+  elements.modelStatus.textContent = "Preparing the local model";
+  elements.modelProgressCopy.textContent = "Starting the 530 MB download…";
+  state.modelLoading = llm.call("load")
+    .then((info) => {
+      state.modelReady = true;
+      return info;
+    })
+    .catch((error) => {
+      elements.modelLoader.classList.add("error");
+      elements.modelStatus.textContent = "Model preparation needs another try";
+      elements.modelProgressCopy.textContent = error.message;
+      elements.modelLoadButton.disabled = false;
+      elements.modelLoadButton.textContent = "Try again";
+      throw error;
+    })
+    .finally(() => { state.modelLoading = null; });
+  return state.modelLoading;
+}
+
+function handleModelEvent(event) {
+  if (event.type === "model-progress") {
+    const percent = Math.max(0, Math.min(100, event.percent || 0));
+    elements.modelLoader.classList.add("loading");
+    elements.modelProgressBar.style.width = `${percent}%`;
+    elements.modelStatus.textContent = `Downloading the local model · ${percent}%`;
+    elements.modelProgressCopy.textContent = event.total
+      ? `${formatBytes(event.loaded)} of ${formatBytes(event.total)}`
+      : `${formatBytes(event.loaded)} downloaded`;
+    return;
+  }
+  if (event.type !== "model-status") return;
+  if (event.status === "ready") {
+    state.modelReady = true;
+    elements.modelLoader.classList.remove("loading", "error");
+    elements.modelLoader.classList.add("ready");
+    elements.modelProgressBar.style.width = "100%";
+    elements.modelStatus.textContent = "Local model ready";
+    elements.modelProgressCopy.textContent = event.webgpu
+      ? "Ready for local questions with WebGPU acceleration."
+      : "Ready for local questions in this browser.";
+    elements.modelLoadButton.textContent = "Model ready";
+    elements.modelLoadButton.disabled = true;
+  } else if (event.status === "thinking") {
+    elements.modelStatus.textContent = "Writing PostgreSQL";
+    elements.modelProgressCopy.textContent = "The model is working with this document's schema.";
+  }
+}
+
+async function askFolio(event) {
+  event.preventDefault();
+  const question = elements.askInput.value.trim();
+  if (!question) {
+    elements.askInput.focus();
+    return;
+  }
+
+  state.assistantBusy = true;
+  elements.askButton.disabled = true;
+  resetAssistantStages();
+  setAssistantStage("schema");
+  setAssistantMessage("Finding the tables and fields that match your question…");
+
+  try {
+    const matches = await search.call("search", { query: question });
+    const tableNames = matches.slice(0, 10).map((match) => match.id);
+    const context = await dataStore.call("assistantContext", { tableNames });
+    completeAssistantStage("schema");
+    setAssistantStage("plan");
+    setAssistantMessage("Planning the report from the inferred schema…");
+
+    const postgresReady = ensurePostgresData();
+    await prepareModel();
+    let { proposal } = await llm.call("ask", { question, context });
+    proposal = validateProposal(proposal);
+    showProposal(proposal);
+    completeAssistantStage("plan");
+    setAssistantStage("check");
+    setAssistantMessage("Checking the query with PostgreSQL…");
+    await postgresReady;
+
+    let result = await postgres.exec(proposal.sql);
+    for (let attempt = 0; result.kind === "error" && attempt < 2; attempt += 1) {
+      completeAssistantStage("check");
+      setAssistantStage("repair");
+      setAssistantMessage(`PostgreSQL returned: ${result.text} Folio is repairing the query…`);
+      const repaired = await llm.call("repair", {
+        question,
+        proposal,
+        error: result.error || { message: result.text },
+        context,
+      });
+      proposal = validateProposal(repaired.proposal);
+      showProposal(proposal);
+      completeAssistantStage("repair");
+      setAssistantStage("check");
+      result = await postgres.exec(proposal.sql);
+    }
+
+    if (result.kind === "error") throw new Error(result.text);
+    completeAssistantStage("check");
+    completeAssistantStage("repair");
+    renderPostgresResult(result);
+    showProposalAnswer(proposal);
+  } catch (error) {
+    markAssistantError();
+    setAssistantMessage(`Folio needs another pass at this question. ${error.message}`, true);
+  } finally {
+    state.assistantBusy = false;
+    elements.askButton.disabled = !state.catalog.length;
+  }
+}
+
+function showProposal(proposal) {
+  elements.sqlOutput.value = proposal.sql.trim();
+  state.sqlSource = "assistant";
+  state.sqlVersion += 1;
+}
+
+function showProposalAnswer(proposal) {
+  elements.assistantAnswer.replaceChildren();
+  const answer = document.createElement("p");
+  answer.textContent = proposal.answer;
+  elements.assistantAnswer.append(answer);
+  if (proposal.assumptions.length) {
+    const heading = document.createElement("strong");
+    heading.textContent = "How Folio read the question";
+    const list = document.createElement("ul");
+    for (const assumption of proposal.assumptions) {
+      const item = document.createElement("li");
+      item.textContent = assumption;
+      list.append(item);
+    }
+    elements.assistantAnswer.append(heading, list);
+  }
+  elements.assistantAnswer.hidden = false;
+}
+
+async function ensurePostgresData() {
+  const generation = state.documentGeneration;
+  if (state.postgresReadyGeneration === generation) return;
+  if (state.postgresLoading) return state.postgresLoading;
+
+  state.postgresLoading = (async () => {
+    await postgres.reset();
+    assertPostgresResult(await postgres.exec(await dataStore.call("postgresSchema")));
+    let offset = 0;
+    while (true) {
+      if (generation !== state.documentGeneration) {
+        throw new Error("A new document is loading. Run this query again when it is ready.");
+      }
+      const batch = await dataStore.call("postgresBatch", { offset, limit: 10_000 });
+      if (batch.sql) assertPostgresResult(await postgres.exec(batch.sql));
+      offset = batch.nextOffset;
+      const percent = batch.total ? Math.round((offset / batch.total) * 100) : 100;
+      setAssistantMessage(`Preparing PostgreSQL · ${percent}%`);
+      if (batch.done) break;
+    }
+    assertPostgresResult(await postgres.exec(await dataStore.call("postgresIndexes")));
+    state.postgresReadyGeneration = generation;
+  })();
+
+  try {
+    await state.postgresLoading;
+  } finally {
+    state.postgresLoading = null;
+  }
+}
+
+function assertPostgresResult(result) {
+  if (result.kind === "error") throw new Error(result.text);
+  return result;
+}
+
+function handlePostgresEvent(event) {
+  if (event.type !== "status" || !state.assistantBusy) return;
+  if (event.state === "fetching") setAssistantMessage("Starting PostgreSQL in this browser…");
+}
+
+function renderPostgresResult(result) {
+  if (result.kind === "table") {
+    renderTableResult(result.columns, result.rows);
+    return;
+  }
+  elements.rowCount.textContent = "Complete";
+  elements.resultWrap.replaceChildren(emptyResult(result.text || "Query complete.", "✓"));
+}
+
+function renderTableResult(columns, rows) {
+  elements.rowCount.textContent = `${rows.length} ${rows.length === 1 ? "row" : "rows"}`;
+  if (!rows.length) {
+    elements.resultWrap.replaceChildren(emptyResult(
+      "This query returned zero rows. Adjust the query or filter, then run it again.",
+      "◇",
+    ));
     return;
   }
 
   const table = document.createElement("table");
   table.className = "result-table";
   const head = table.createTHead().insertRow();
-  for (const column of result.columns) {
+  for (const column of columns) {
     const cell = document.createElement("th");
     cell.scope = "col";
     cell.textContent = friendlyName(column);
     head.append(cell);
   }
   const body = table.createTBody();
-  for (const row of result.rows) {
+  for (const row of rows) {
     const line = body.insertRow();
-    for (const column of result.columns) {
+    for (let index = 0; index < columns.length; index += 1) {
       const cell = line.insertCell();
-      cell.textContent = formatValue(row[column]);
+      cell.textContent = formatValue(row[index]);
       cell.title = cell.textContent;
     }
   }
   elements.resultWrap.replaceChildren(table);
+}
+
+function renderQueryError(message) {
+  elements.rowCount.textContent = "Query error";
+  elements.resultWrap.replaceChildren(emptyResult(message, "!"));
+}
+
+function emptyResult(message, symbol) {
+  const wrap = document.createElement("div");
+  wrap.className = "empty-result";
+  const icon = document.createElement("span");
+  icon.setAttribute("aria-hidden", "true");
+  icon.textContent = symbol;
+  const copy = document.createElement("p");
+  copy.textContent = message;
+  wrap.append(icon, copy);
+  return wrap;
+}
+
+function resetAssistantStages() {
+  for (const stage of elements.assistantFlow.querySelectorAll("[data-assistant-stage]")) {
+    stage.classList.remove("active", "complete", "error");
+    stage.removeAttribute("aria-current");
+  }
+}
+
+function setAssistantStage(name) {
+  const stage = elements.assistantFlow.querySelector(`[data-assistant-stage="${name}"]`);
+  stage?.classList.add("active");
+  stage?.setAttribute("aria-current", "step");
+}
+
+function completeAssistantStage(name) {
+  const stage = elements.assistantFlow.querySelector(`[data-assistant-stage="${name}"]`);
+  stage?.classList.remove("active", "error");
+  stage?.classList.add("complete");
+  stage?.removeAttribute("aria-current");
+}
+
+function markAssistantError() {
+  const stage = elements.assistantFlow.querySelector(".active");
+  stage?.classList.add("error");
+}
+
+function setAssistantMessage(message, error = false) {
+  elements.assistantAnswer.replaceChildren();
+  const copy = document.createElement("p");
+  copy.textContent = message;
+  elements.assistantAnswer.append(copy);
+  elements.assistantAnswer.classList.toggle("error", error);
+  elements.assistantAnswer.hidden = false;
 }
 
 function friendlyName(value) {
@@ -352,4 +671,10 @@ function formatValue(value) {
   if (value === null || value === undefined) return "—";
   if (typeof value === "object") return JSON.stringify(value);
   return String(value);
+}
+
+function formatBytes(value) {
+  const bytes = Number(value) || 0;
+  if (bytes < 1_000_000) return `${Math.round(bytes / 1_000)} KB`;
+  return `${(bytes / 1_000_000).toFixed(bytes < 10_000_000 ? 1 : 0)} MB`;
 }
