@@ -1,4 +1,4 @@
-import { validateProposal, validateReadQuery } from "./assistant-context.js";
+import { validateProposal, validateReadQuery } from "./assistant-context.js?v=20260823-17";
 import { PgrustClient } from "./pgrust-client.js";
 
 const elements = {
@@ -14,6 +14,7 @@ const elements = {
   tableSearch: document.querySelector("#table-search"),
   tableSelect: document.querySelector("#table-select"),
   operationSelect: document.querySelector("#operation-select"),
+  builderTitle: document.querySelector("#builder-title"),
   queryPrompt: document.querySelector("#query-prompt"),
   fieldPicker: document.querySelector("#field-picker"),
   filterBlock: document.querySelector("#filter-block"),
@@ -45,7 +46,7 @@ const elements = {
 };
 
 function WorkerClient(path, onEvent = () => {}) {
-  this.worker = new Worker(`${path}?v=20260823-16`, { type: "module" });
+  this.worker = new Worker(`${path}?v=20260823-17`, { type: "module" });
   this.nextId = 0;
   this.pending = new Map();
   this.worker.addEventListener("message", ({ data }) => {
@@ -93,6 +94,8 @@ const state = {
   modelReady: false,
   modelLoading: null,
   assistantBusy: false,
+  assistantPhase: "idle",
+  postgresStatus: "",
   sqlSource: "wizard",
   sqlVersion: 0,
   plan: {
@@ -181,6 +184,7 @@ async function openDocument(source, buffer, format, label) {
   const generation = ++state.documentGeneration;
   state.postgresReadyGeneration = 0;
   state.postgresLoading = null;
+  state.postgresStatus = "";
   setPreparation("map", "Mapping the document structure…");
   const mapped = await mapper.call("map", { source, format, buffer }, [buffer]);
   if (generation !== state.documentGeneration) return;
@@ -366,6 +370,7 @@ async function updateSql() {
   if (version !== state.sqlVersion) return;
   elements.sqlOutput.value = sql;
   state.sqlSource = "wizard";
+  if (!state.assistantBusy) elements.builderTitle.textContent = "Ask this document";
 }
 
 async function runCurrentQuery() {
@@ -422,6 +427,20 @@ async function prepareModel() {
 }
 
 function handleModelEvent(event) {
+  if (event.type === "model-generation") {
+    const seconds = Math.max(1, Math.round(event.elapsedMs / 1_000));
+    elements.modelStatus.textContent = `Writing PostgreSQL · ${seconds}s`;
+    elements.modelProgressCopy.textContent = `${event.characters} characters written.`;
+    if (state.assistantPhase === "generate" || state.assistantPhase === "repair") {
+      setAssistantMessage(`Writing PostgreSQL · ${seconds}s · ${event.characters} characters`);
+      if (event.sql) {
+        elements.sqlOutput.value = event.sql;
+        state.sqlSource = "assistant-stream";
+        state.sqlVersion += 1;
+      }
+    }
+    return;
+  }
   if (event.type === "model-progress") {
     const percent = Math.max(0, Math.min(100, event.percent || 0));
     elements.modelLoader.classList.add("loading");
@@ -494,17 +513,22 @@ async function askFolio(event) {
   }
 
   state.assistantBusy = true;
+  state.assistantPhase = "schema";
   elements.askButton.disabled = true;
+  elements.builderTitle.textContent = "Writing your query";
+  elements.queryPrompt.hidden = false;
+  elements.queryPrompt.textContent = question;
   resetAssistantStages();
   setAssistantStage("schema");
   setAssistantMessage("Finding the tables and fields that match your question…");
 
   try {
-    const matches = await search.call("search", { query: question });
-    const tableNames = matches.slice(0, 10).map((match) => match.id);
-    const context = await dataStore.call("assistantContext", { tableNames });
+    const matches = await search.call("contextSearch", { query: question });
+    const tableNames = matches.slice(0, 6).map((match) => match.id);
+    const context = await dataStore.call("assistantContext", { tableNames, question });
     completeAssistantStage("schema");
     setAssistantStage("plan");
+    state.assistantPhase = "plan";
     setAssistantMessage("Planning the report from the inferred schema…");
 
     const postgresReady = ensurePostgresData().then(
@@ -512,19 +536,26 @@ async function askFolio(event) {
       (error) => ({ error }),
     );
     await prepareModel();
+    state.assistantPhase = "generate";
+    setAssistantMessage("Writing PostgreSQL from this document’s schema…");
     let { proposal } = await llm.call("ask", { question, context });
     proposal = validateProposal(proposal);
     showProposal(proposal);
+    elements.builderTitle.textContent = "Review your query";
     completeAssistantStage("plan");
     setAssistantStage("check");
-    setAssistantMessage("Checking the query with PostgreSQL…");
+    state.assistantPhase = "postgres";
+    setAssistantMessage(state.postgresStatus || "Preparing PostgreSQL…");
     const postgresState = await postgresReady;
     if (postgresState.error) throw postgresState.error;
 
+    state.assistantPhase = "check";
+    setAssistantMessage("Checking the query with PostgreSQL…");
     let result = await postgres.exec(proposal.sql);
     for (let attempt = 0; result.kind === "error" && attempt < 2; attempt += 1) {
       completeAssistantStage("check");
       setAssistantStage("repair");
+      state.assistantPhase = "repair";
       setAssistantMessage(`PostgreSQL returned: ${result.text} Folio is repairing the query…`);
       const repaired = await llm.call("repair", {
         question,
@@ -536,6 +567,7 @@ async function askFolio(event) {
       showProposal(proposal);
       completeAssistantStage("repair");
       setAssistantStage("check");
+      state.assistantPhase = "check";
       result = await postgres.exec(proposal.sql);
     }
 
@@ -549,6 +581,7 @@ async function askFolio(event) {
     setAssistantMessage(`Folio needs another pass at this question. ${error.message}`, true);
   } finally {
     state.assistantBusy = false;
+    state.assistantPhase = "idle";
     elements.askButton.disabled = !state.catalog.length;
   }
 }
@@ -595,14 +628,14 @@ async function ensurePostgresData() {
       if (batch.sql) assertPostgresResult(await postgres.exec(batch.sql));
       offset = batch.nextOffset;
       const percent = batch.total ? Math.round((offset / batch.total) * 100) : 100;
-      setAssistantMessage(`Preparing PostgreSQL · ${percent}%`);
+      setPostgresStatus(`Preparing PostgreSQL · ${percent}%`);
       if (batch.done) break;
     }
-    setAssistantMessage("Building PostgreSQL indexes · starting");
+    setPostgresStatus("Building PostgreSQL indexes · starting");
     const indexStartedAt = performance.now();
     const indexTimer = window.setInterval(() => {
       const seconds = Math.max(1, Math.round((performance.now() - indexStartedAt) / 1_000));
-      setAssistantMessage(`Building PostgreSQL indexes · ${seconds}s`);
+      setPostgresStatus(`Building PostgreSQL indexes · ${seconds}s`);
     }, 1_000);
     try {
       assertPostgresResult(await postgres.exec(await dataStore.call("postgresIndexes")));
@@ -610,7 +643,7 @@ async function ensurePostgresData() {
       window.clearInterval(indexTimer);
     }
     state.postgresReadyGeneration = generation;
-    setAssistantMessage("PostgreSQL ready · checking the query");
+    setPostgresStatus("PostgreSQL ready");
   })();
 
   try {
@@ -627,7 +660,12 @@ function assertPostgresResult(result) {
 
 function handlePostgresEvent(event) {
   if (event.type !== "status" || !state.assistantBusy) return;
-  if (event.state === "fetching") setAssistantMessage("Starting PostgreSQL in this browser…");
+  if (event.state === "fetching") setPostgresStatus("Starting PostgreSQL in this browser…");
+}
+
+function setPostgresStatus(message) {
+  state.postgresStatus = message;
+  if (state.assistantPhase === "postgres") setAssistantMessage(message);
 }
 
 function renderPostgresResult(result) {

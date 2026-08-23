@@ -1,13 +1,13 @@
 export const QUERY_RESPONSE_SCHEMA = {
   type: "object",
   properties: {
-    answer: {
-      type: "string",
-      description: "A short explanation of the report and its result columns.",
-    },
     sql: {
       type: "string",
       description: "One read-only PostgreSQL SELECT or WITH query.",
+    },
+    answer: {
+      type: "string",
+      description: "A short explanation of the report and its result columns.",
     },
     tables: {
       type: "array",
@@ -20,30 +20,26 @@ export const QUERY_RESPONSE_SCHEMA = {
       description: "Data interpretations that help the user review the query.",
     },
   },
-  required: ["answer", "sql", "tables", "assumptions"],
+  required: ["sql", "answer", "tables", "assumptions"],
   additionalProperties: false,
 };
 
 export function buildSystemPrompt(context) {
-  return `You are Folio's PostgreSQL report planner.
+  return `Create a PostgreSQL report for Folio.
 
-Folio converts a nested JSON or XML document into one PostgreSQL table named nodes.
+The document is in one table:
+- nodes(id TEXT, parent_id TEXT, name TEXT, path TEXT, data_type TEXT, value TEXT)
 
-nodes has these columns:
-- id TEXT: the stable identifier for one inferred record.
-- parent_id TEXT: the containing record identifier. Join a child record to its parent with child.parent_id = parent.id.
-- name TEXT: the inferred table name.
-- path TEXT: the scalar field path within the inferred record.
-- data_type TEXT: string, number, or boolean.
-- value TEXT: the scalar value. Cast value for numeric and date operations.
+Rows with the same name and id are one inferred record. Pivot fields with:
+max(value) FILTER (WHERE path = 'field').
 
-Rows with the same name and id form one record. Pivot those rows with max(value) FILTER (WHERE path = 'field'). Repeated arrays create child tables. The _tree rows connect every record to its inferred table name. XML attributes start with @. XML element text uses $text. RDF references use values such as #Pathway2 and can resolve to an @rdf:id field with ltrim(reference, '#').
+Join contained records with child.parent_id = parent.id. XML attributes start with @. Element text uses $text. Resolve RDF #references with ltrim(reference, '#').
 
-Create one read-only PostgreSQL query that answers the user's question. Start with SELECT or WITH. Use CTEs to pivot records. Use parent_id for structural joins. Use identifiers and field paths from the supplied schema. Include clear result column aliases. Use LIMIT 100 for row reports. Return aggregates at their natural size.
+Return one read-only SELECT or WITH query. Use only the supplied names and paths. Use clear aliases. Limit row reports to 100 rows.
 
-Return the constrained response object. Put the query in sql. Put a concise user-facing explanation in answer. List every inferred table in tables. State useful interpretations in assumptions.
+Return the constrained object with answer, sql, tables, and assumptions.
 
-Loaded document context:
+Relevant schema:
 ${JSON.stringify(context)}`;
 }
 
@@ -57,7 +53,7 @@ ${JSON.stringify(proposal)}
 PostgreSQL diagnostic:
 ${JSON.stringify(error)}
 
-Relevant loaded document context:
+Relevant schema:
 ${JSON.stringify(context)}
 
 Return a corrected constrained response. Preserve the user's requested meaning.`;

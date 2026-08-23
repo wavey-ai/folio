@@ -4,7 +4,7 @@ import {
   buildRepairPrompt,
   buildSystemPrompt,
   validateProposal,
-} from "./assistant-context.js";
+} from "./assistant-context.js?v=20260823-17";
 
 const MODEL = {
   repo: "LiquidAI/LFM2.5-230M-GGUF",
@@ -179,7 +179,8 @@ function withNativeLog(error) {
 
 async function complete(messages) {
   self.postMessage({ type: "model-status", status: "thinking", message: "Writing PostgreSQL…" });
-  const response = await runtime.createChatCompletion({
+  const startedAt = performance.now();
+  const stream = await runtime.createChatCompletion({
     messages,
     response_format: {
       type: "json_schema",
@@ -189,12 +190,37 @@ async function complete(messages) {
         schema: QUERY_RESPONSE_SCHEMA,
       },
     },
-    max_tokens: 1_200,
+    max_tokens: 1_000,
     temperature: 0.1,
     top_p: 0.9,
     seed: 42,
+    stream: true,
   });
-  const content = response.choices[0]?.message?.content || "";
+  let content = "";
+  let usage = null;
+  let lastUpdate = 0;
+  for await (const chunk of stream) {
+    usage = chunk.usage || usage;
+    const delta = chunk.choices?.[0]?.delta?.content || "";
+    if (!delta) continue;
+    content += delta;
+    const now = performance.now();
+    if (now - lastUpdate >= 200) {
+      lastUpdate = now;
+      self.postMessage({
+        type: "model-generation",
+        characters: content.length,
+        elapsedMs: Math.round(now - startedAt),
+        sql: extractPartialJsonString(content, "sql"),
+      });
+    }
+  }
+  self.postMessage({
+    type: "model-generation",
+    characters: content.length,
+    elapsedMs: Math.round(performance.now() - startedAt),
+    sql: extractPartialJsonString(content, "sql"),
+  });
   const proposal = validateProposal(JSON.parse(content));
   self.postMessage({
     type: "model-status",
@@ -202,7 +228,35 @@ async function complete(messages) {
     message: "Local model ready",
     ...modelInfo(),
   });
-  return { proposal, usage: response.usage };
+  return { proposal, usage };
+}
+
+function extractPartialJsonString(json, key) {
+  const match = new RegExp(`"${key}"\\s*:\\s*"`).exec(json);
+  if (!match) return "";
+  let output = "";
+  for (let index = match.index + match[0].length; index < json.length; index += 1) {
+    const character = json[index];
+    if (character === '"') break;
+    if (character !== "\\") {
+      output += character;
+      continue;
+    }
+    const escaped = json[++index];
+    if (escaped === undefined) break;
+    if (escaped === "n") output += "\n";
+    else if (escaped === "r") output += "\r";
+    else if (escaped === "t") output += "\t";
+    else if (escaped === "b") output += "\b";
+    else if (escaped === "f") output += "\f";
+    else if (escaped === "u") {
+      const code = json.slice(index + 1, index + 5);
+      if (!/^[0-9a-f]{4}$/i.test(code)) break;
+      output += String.fromCharCode(Number.parseInt(code, 16));
+      index += 4;
+    } else output += escaped;
+  }
+  return output;
 }
 
 function modelInfo() {

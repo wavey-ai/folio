@@ -30,6 +30,16 @@ test("workers map, catalog, search, and query a document", async (context) => {
   const matches = await search.call("search", { query: "ammount" });
   assert.ok(matches.some((match) => match.id === table.name));
 
+  const question = "Which customer records have the greatest amount?";
+  const contextMatches = await search.call("contextSearch", { query: question });
+  assert.ok(contextMatches.some((match) => match.id === table.name));
+  const assistantContext = await data.call("assistantContext", {
+    tableNames: contextMatches.slice(0, 6).map((match) => match.id),
+    question,
+  });
+  assert.ok(assistantContext.tables.some((item) => item.name === table.name));
+  assert.ok(assistantContext.tables.every((item) => item.fields.length <= 14));
+
   const plan = {
     table: table.name,
     operation: "rows",

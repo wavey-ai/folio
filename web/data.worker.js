@@ -22,7 +22,7 @@ self.addEventListener("message", ({ data }) => {
     } else if (operation === "preview") {
       result = preview(data.plan, leaves, catalog);
     } else if (operation === "assistantContext") {
-      result = assistantContext(data.tableNames || []);
+      result = assistantContext(data.tableNames || [], data.question || "");
     } else if (operation === "postgresSchema") {
       result = postgresSchema();
     } else if (operation === "postgresBatch") {
@@ -40,7 +40,7 @@ CREATE INDEX nodes_name_path_idx ON nodes (name, path);`;
   }
 });
 
-function assistantContext(requestedNames) {
+function assistantContext(requestedNames, question) {
   const treeNames = new Map(
     leaves.filter((leaf) => leaf.name === "_tree").map((leaf) => [leaf.id, leaf.value]),
   );
@@ -55,11 +55,18 @@ function assistantContext(requestedNames) {
     addRelation(children, parentName, leaf.name);
   }
 
-  const chosen = new Set(requestedNames.filter((name) => catalog.some((table) => table.name === name)));
-  if (!chosen.size) catalog.slice(0, 12).forEach((table) => chosen.add(table.name));
-  for (const name of [...chosen]) {
-    for (const parent of parents.get(name) || []) chosen.add(parent);
-    for (const child of children.get(name) || []) chosen.add(child);
+  const catalogNames = new Set(catalog.map((table) => table.name));
+  const requested = [...new Set(requestedNames)]
+    .filter((name) => catalogNames.has(name))
+    .slice(0, 6);
+  if (!requested.length) requested.push(...catalog.slice(0, 4).map((table) => table.name));
+
+  const chosen = new Set(requested);
+  for (const name of requested) {
+    for (const related of [...(parents.get(name) || []), ...(children.get(name) || [])]) {
+      if (chosen.size >= 8) break;
+      chosen.add(related);
+    }
   }
 
   const samples = new Map();
@@ -68,34 +75,48 @@ function assistantContext(requestedNames) {
     const key = `${leaf.name}\u0000${leaf.path}`;
     if (!samples.has(key)) samples.set(key, []);
     const values = samples.get(key);
-    const value = String(leaf.value).slice(0, 120);
-    if (values.length < 3 && !values.includes(value)) values.push(value);
+    const value = String(leaf.value).slice(0, 60);
+    if (!values.length) values.push(value);
   }
 
+  const questionTerms = String(question)
+    .toLowerCase()
+    .split(/[^a-z0-9@:$]+/)
+    .filter((term) => term.length >= 3);
+
   return {
-    document: {
-      label: documentLabel,
-      tableCount: catalog.length,
-      valueCount: leaves.reduce((count, leaf) => count + Number(leaf.name !== "_tree"), 0),
-    },
-    allTables: catalog.map((table) => ({
-      name: table.name,
-      fields: table.fields.map((field) => `${field.name}:${field.type}`),
-    })),
-    relevantTables: catalog
+    document: documentLabel,
+    tableCount: catalog.length,
+    tables: catalog
       .filter((table) => chosen.has(table.name))
       .map((table) => ({
         name: table.name,
-        rowCount: table.rowCount,
-        parentTables: [...(parents.get(table.name) || [])],
-        childTables: [...(children.get(table.name) || [])],
-        fields: table.fields.map((field) => ({
-          name: field.name,
-          type: field.type,
-          samples: samples.get(`${table.name}\u0000${field.name}`) || [],
-        })),
+        rows: table.rowCount,
+        parents: [...(parents.get(table.name) || [])].slice(0, 4),
+        children: [...(children.get(table.name) || [])].slice(0, 4),
+        fields: [...table.fields]
+          .sort((left, right) => fieldScore(right.name, questionTerms) - fieldScore(left.name, questionTerms))
+          .slice(0, 14)
+          .map((field, index) => {
+            const example = samples.get(`${table.name}\u0000${field.name}`)?.[0];
+            return example === undefined || index >= 4
+              ? `${field.name}:${field.type}`
+              : `${field.name}:${field.type}=${JSON.stringify(example)}`;
+          }),
       })),
   };
+}
+
+function fieldScore(name, questionTerms) {
+  const normalized = name.toLowerCase().replaceAll("_", " ");
+  const matches = questionTerms.reduce(
+    (score, term) => score + Number(normalized.includes(term)) * 10,
+    0,
+  );
+  const structural = /(^|[:/@_])(id|name|title|display|ref|resource|text|type|date|value)\b/i.test(name)
+    ? 2
+    : 0;
+  return matches + structural;
 }
 
 function addRelation(map, source, target) {
