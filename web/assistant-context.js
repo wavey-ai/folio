@@ -43,18 +43,15 @@ Relevant schema:
 ${JSON.stringify(context)}`;
 }
 
-export function buildRepairPrompt({ question, proposal, error, context }) {
+export function buildRepairPrompt({ question, proposal, error }) {
   return `Repair the PostgreSQL query for this question:
 ${question}
 
-Previous constrained response:
-${JSON.stringify(proposal)}
+Previous PostgreSQL:
+${proposal.sql}
 
 PostgreSQL diagnostic:
 ${JSON.stringify(error)}
-
-Relevant schema:
-${JSON.stringify(context)}
 
 Return a corrected constrained response. Preserve the user's requested meaning.`;
 }

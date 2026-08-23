@@ -10,7 +10,7 @@
       content="Turn JSON and XML documents into fully traversable schemas and PostgreSQL reports."
     />
     <title>Folio Studio</title>
-    <link rel="stylesheet" href="./styles.css?v=20260823-17" />
+    <link rel="stylesheet" href="./styles.css?v=20260823-19" />
   </head>
   <body>
     <header class="topbar">
@@ -129,7 +129,7 @@
           <div class="panel-heading">
             <div>
               <p class="panel-kicker">Visual query</p>
-              <h2 id="builder-title">Ask this document</h2>
+              <h2 id="builder-title" aria-live="polite">Ask this document</h2>
             </div>
             <button class="primary-button" id="run-button" type="button">Run preview</button>
           </div>
@@ -272,6 +272,6 @@ JOIN nodes AS parent
       </button>
     </template>
 
-    <script type="module" src="./app.js?v=20260823-17"></script>
+    <script type="module" src="./app.js?v=20260823-19"></script>
   </body>
 </html>

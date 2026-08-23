@@ -1,4 +1,4 @@
-import { validateProposal, validateReadQuery } from "./assistant-context.js?v=20260823-17";
+import { validateProposal, validateReadQuery } from "./assistant-context.js?v=20260823-19";
 import { PgrustClient } from "./pgrust-client.js";
 
 const elements = {
@@ -46,7 +46,7 @@ const elements = {
 };
 
 function WorkerClient(path, onEvent = () => {}) {
-  this.worker = new Worker(`${path}?v=20260823-17`, { type: "module" });
+  this.worker = new Worker(`${path}?v=20260823-19`, { type: "module" });
   this.nextId = 0;
   this.pending = new Map();
   this.worker.addEventListener("message", ({ data }) => {
@@ -93,8 +93,12 @@ const state = {
   leafCount: 0,
   modelReady: false,
   modelLoading: null,
+  modelProof: "",
+  modelWarmupStartedAt: 0,
+  modelWarmupTimer: null,
   assistantBusy: false,
   assistantPhase: "idle",
+  generationCharacters: 0,
   postgresStatus: "",
   sqlSource: "wizard",
   sqlVersion: 0,
@@ -120,6 +124,9 @@ elements.askForm.addEventListener("submit", askFolio);
 elements.sqlOutput.addEventListener("input", () => {
   state.sqlSource = "edited";
   state.sqlVersion += 1;
+  elements.runButton.textContent = "Run query";
+  elements.runButton.disabled = !elements.sqlOutput.value.trim();
+  elements.copyButton.disabled = !elements.sqlOutput.value.trim();
 });
 elements.reactomeButton.addEventListener("click", loadReactomeSample);
 elements.tableSearch.addEventListener("input", searchTables);
@@ -365,12 +372,16 @@ function updateFilter() {
 }
 
 async function updateSql() {
+  if (state.assistantBusy) return;
   const version = ++state.sqlVersion;
   const sql = await dataStore.call("sql", { plan: state.plan });
   if (version !== state.sqlVersion) return;
   elements.sqlOutput.value = sql;
   state.sqlSource = "wizard";
-  if (!state.assistantBusy) elements.builderTitle.textContent = "Ask this document";
+  elements.builderTitle.textContent = "Ask this document";
+  elements.runButton.textContent = "Run preview";
+  elements.runButton.disabled = false;
+  elements.copyButton.disabled = !sql.trim();
 }
 
 async function runCurrentQuery() {
@@ -415,6 +426,7 @@ async function prepareModel() {
       return info;
     })
     .catch((error) => {
+      stopModelWarmup();
       elements.modelLoader.classList.add("error");
       elements.modelStatus.textContent = "Model preparation needs another try";
       elements.modelProgressCopy.textContent = error.message;
@@ -427,12 +439,32 @@ async function prepareModel() {
 }
 
 function handleModelEvent(event) {
+  if (event.type === "model-warmup") {
+    startModelWarmup(event.elapsedMs);
+    return;
+  }
   if (event.type === "model-generation") {
+    state.generationCharacters = Math.max(state.generationCharacters, event.characters || 0);
     const seconds = Math.max(1, Math.round(event.elapsedMs / 1_000));
-    elements.modelStatus.textContent = `Writing PostgreSQL · ${seconds}s`;
-    elements.modelProgressCopy.textContent = `${event.characters} characters written.`;
+    const writing = state.generationCharacters > 0;
+    elements.modelStatus.textContent = writing
+      ? `Writing PostgreSQL · ${seconds}s`
+      : `Reading the schema · ${seconds}s`;
+    const generationStatus = writing
+      ? `${state.generationCharacters} characters written.`
+      : "The model is preparing its first PostgreSQL token.";
+    elements.modelProgressCopy.textContent = state.modelProof
+      ? `The model replied “${state.modelProof}” · ${generationStatus}`
+      : generationStatus;
     if (state.assistantPhase === "generate" || state.assistantPhase === "repair") {
-      setAssistantMessage(`Writing PostgreSQL · ${seconds}s · ${event.characters} characters`);
+      elements.builderTitle.textContent = state.assistantPhase === "repair"
+        ? `Repairing your query · ${seconds}s`
+        : writing
+          ? `Writing your query · ${seconds}s · ${state.generationCharacters} characters`
+          : `Reading your schema · ${seconds}s`;
+      setAssistantMessage(writing
+        ? `Writing PostgreSQL · ${seconds}s · ${state.generationCharacters} characters`
+        : `Reading the schema · ${seconds}s`);
       if (event.sql) {
         elements.sqlOutput.value = event.sql;
         state.sqlSource = "assistant-stream";
@@ -453,14 +485,19 @@ function handleModelEvent(event) {
   }
   if (event.type !== "model-status") return;
   if (event.status === "ready") {
+    stopModelWarmup();
+    if (event.proof) state.modelProof = event.proof;
     state.modelReady = true;
     elements.modelLoader.classList.remove("loading", "error");
     elements.modelLoader.classList.add("ready");
     elements.modelProgressBar.style.width = "100%";
     elements.modelStatus.textContent = "Local model ready";
-    elements.modelProgressCopy.textContent = event.backend === "webgpu"
-      ? "Ready for local questions with WebGPU acceleration."
-      : "Ready for local questions with CPU compatibility.";
+    elements.modelProgressCopy.textContent = state.modelProof
+      ? `The model replied “${state.modelProof}” and is ready.`
+      : "Ready for local questions.";
+    if (event.proof && state.assistantBusy && state.assistantPhase === "plan") {
+      setAssistantMessage(`The local model replied “${event.proof}”. Writing your query next…`);
+    }
     elements.modelLoadButton.textContent = "Model ready";
     elements.modelLoadButton.disabled = true;
   } else if (event.status === "loading") {
@@ -472,6 +509,50 @@ function handleModelEvent(event) {
   } else if (event.status === "thinking") {
     elements.modelStatus.textContent = "Writing PostgreSQL";
     elements.modelProgressCopy.textContent = "The model is working with this document's schema.";
+  }
+}
+
+function startModelWarmup(elapsedMs = 0) {
+  if (!state.modelWarmupTimer) {
+    state.modelWarmupStartedAt = performance.now() - elapsedMs;
+    state.modelWarmupTimer = window.setInterval(renderModelWarmup, 1_000);
+  }
+  renderModelWarmup();
+}
+
+function renderModelWarmup() {
+  const seconds = Math.max(1, Math.round(
+    (performance.now() - state.modelWarmupStartedAt) / 1_000,
+  ));
+  elements.modelStatus.textContent = `Checking the local model · ${seconds}s`;
+  elements.modelProgressCopy.textContent = "Folio sent “Hi.” and is waiting for the first reply.";
+  if (state.assistantBusy && state.assistantPhase === "plan") {
+    elements.builderTitle.textContent = `Checking the local model · ${seconds}s`;
+    setAssistantMessage(`Checking the local model · ${seconds}s`);
+  }
+}
+
+function stopModelWarmup() {
+  window.clearInterval(state.modelWarmupTimer);
+  state.modelWarmupTimer = null;
+  state.modelWarmupStartedAt = 0;
+}
+
+async function runModelGeneration(operation, payload) {
+  state.generationCharacters = 0;
+  const startedAt = performance.now();
+  const renderHeartbeat = () => handleModelEvent({
+    type: "model-generation",
+    characters: state.generationCharacters,
+    elapsedMs: Math.round(performance.now() - startedAt),
+    sql: "",
+  });
+  renderHeartbeat();
+  const timer = window.setInterval(renderHeartbeat, 1_000);
+  try {
+    return await llm.call(operation, payload);
+  } finally {
+    window.clearInterval(timer);
   }
 }
 
@@ -514,10 +595,19 @@ async function askFolio(event) {
 
   state.assistantBusy = true;
   state.assistantPhase = "schema";
+  state.sqlSource = "assistant-stream";
+  state.sqlVersion += 1;
   elements.askButton.disabled = true;
+  elements.runButton.disabled = true;
+  elements.runButton.textContent = "Writing query…";
+  elements.copyButton.disabled = true;
   elements.builderTitle.textContent = "Writing your query";
   elements.queryPrompt.hidden = false;
   elements.queryPrompt.textContent = question;
+  elements.sqlOutput.value = "";
+  elements.sqlOutput.placeholder = "Your PostgreSQL will appear here.";
+  elements.sqlOutput.readOnly = true;
+  elements.sqlOutput.setAttribute("aria-busy", "true");
   resetAssistantStages();
   setAssistantStage("schema");
   setAssistantMessage("Finding the tables and fields that match your question…");
@@ -538,10 +628,10 @@ async function askFolio(event) {
     await prepareModel();
     state.assistantPhase = "generate";
     setAssistantMessage("Writing PostgreSQL from this document’s schema…");
-    let { proposal } = await llm.call("ask", { question, context });
+    let { proposal } = await runModelGeneration("ask", { question, context });
     proposal = validateProposal(proposal);
     showProposal(proposal);
-    elements.builderTitle.textContent = "Review your query";
+    elements.builderTitle.textContent = "Query written · preparing the result";
     completeAssistantStage("plan");
     setAssistantStage("check");
     state.assistantPhase = "postgres";
@@ -550,14 +640,16 @@ async function askFolio(event) {
     if (postgresState.error) throw postgresState.error;
 
     state.assistantPhase = "check";
+    elements.builderTitle.textContent = "Checking your query";
     setAssistantMessage("Checking the query with PostgreSQL…");
     let result = await postgres.exec(proposal.sql);
     for (let attempt = 0; result.kind === "error" && attempt < 2; attempt += 1) {
       completeAssistantStage("check");
       setAssistantStage("repair");
       state.assistantPhase = "repair";
+      elements.builderTitle.textContent = "Repairing your query";
       setAssistantMessage(`PostgreSQL returned: ${result.text} Folio is repairing the query…`);
-      const repaired = await llm.call("repair", {
+      const repaired = await runModelGeneration("repair", {
         question,
         proposal,
         error: result.error || { message: result.text },
@@ -576,12 +668,22 @@ async function askFolio(event) {
     completeAssistantStage("repair");
     renderPostgresResult(result);
     showProposalAnswer(proposal);
+    elements.builderTitle.textContent = "Query ready";
   } catch (error) {
     markAssistantError();
+    elements.builderTitle.textContent = elements.sqlOutput.value.trim()
+      ? "Review this query draft"
+      : "Query needs another pass";
     setAssistantMessage(`Folio needs another pass at this question. ${error.message}`, true);
   } finally {
     state.assistantBusy = false;
     state.assistantPhase = "idle";
+    elements.sqlOutput.readOnly = false;
+    elements.sqlOutput.removeAttribute("aria-busy");
+    elements.sqlOutput.placeholder = "";
+    elements.copyButton.disabled = !elements.sqlOutput.value.trim();
+    elements.runButton.disabled = !elements.sqlOutput.value.trim();
+    elements.runButton.textContent = "Run query";
     elements.askButton.disabled = !state.catalog.length;
   }
 }

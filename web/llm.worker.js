@@ -4,7 +4,7 @@ import {
   buildRepairPrompt,
   buildSystemPrompt,
   validateProposal,
-} from "./assistant-context.js?v=20260823-17";
+} from "./assistant-context.js?v=20260823-19";
 
 const MODEL = {
   repo: "LiquidAI/LFM2.5-230M-GGUF",
@@ -63,9 +63,16 @@ async function loadModel() {
     await loadIntoRuntime(runtime, { backend, safari, reportProgress: true }).catch((error) => {
       throw withNativeLog(error);
     });
+    const proof = await warmModel();
     const info = modelInfo();
-    self.postMessage({ type: "model-status", status: "ready", message: "Local model ready", ...info });
-    return info;
+    self.postMessage({
+      type: "model-status",
+      status: "ready",
+      message: "Local model ready",
+      proof,
+      ...info,
+    });
+    return { ...info, proof };
   })();
 
   try {
@@ -73,6 +80,22 @@ async function loadModel() {
   } finally {
     loading = null;
   }
+}
+
+async function warmModel() {
+  self.postMessage({ type: "model-warmup", elapsedMs: 0 });
+  const response = await runtime.createChatCompletion({
+    messages: [
+      { role: "system", content: "Reply with exactly: Hi" },
+      { role: "user", content: "Hi" },
+    ],
+    max_tokens: 8,
+    temperature: 0,
+    seed: 42,
+  });
+  const reply = response.choices?.[0]?.message?.content?.trim();
+  if (!reply) throw new Error("The local model returned an empty warm-up response.");
+  return reply.slice(0, 40);
 }
 
 function createRuntime(selectedBackend) {
@@ -180,6 +203,7 @@ function withNativeLog(error) {
 async function complete(messages) {
   self.postMessage({ type: "model-status", status: "thinking", message: "Writing PostgreSQL…" });
   const startedAt = performance.now();
+  self.postMessage({ type: "model-generation", characters: 0, elapsedMs: 0, sql: "" });
   const stream = await runtime.createChatCompletion({
     messages,
     response_format: {
@@ -190,7 +214,7 @@ async function complete(messages) {
         schema: QUERY_RESPONSE_SCHEMA,
       },
     },
-    max_tokens: 1_000,
+    max_tokens: outputTokenLimit(),
     temperature: 0.1,
     top_p: 0.9,
     seed: 42,
@@ -229,6 +253,10 @@ async function complete(messages) {
     ...modelInfo(),
   });
   return { proposal, usage };
+}
+
+function outputTokenLimit() {
+  return runtime.getLoadedContextInfo().n_ctx >= 8_192 ? 2_400 : 1_600;
 }
 
 function extractPartialJsonString(json, key) {

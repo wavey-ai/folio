@@ -40,7 +40,7 @@ test("query validator keeps report operations read only", () => {
   );
 });
 
-test("proposal validation and repair prompt preserve context", () => {
+test("proposal validation and repair prompt preserve the diagnostic", () => {
   const proposal = {
     answer: "Show customer names.",
     sql: "SELECT value FROM nodes WHERE name = 'report__customers' LIMIT 100;",
