@@ -17,7 +17,11 @@ export function jsonToSql(name: string, input: string, config_json?: string | nu
 
 export function mapJson(name: string, input: string, config_json?: string | null): string;
 
+export function mapJsonCompact(name: string, input: Uint8Array, config_json?: string | null): Uint8Array;
+
 export function mapXml(name: string, input: string, config_json?: string | null): string;
+
+export function mapXmlCompact(name: string, input: Uint8Array, config_json?: string | null): Uint8Array;
 
 export type InitInput = RequestInfo | URL | Response | BufferSource | WebAssembly.Module;
 
@@ -28,7 +32,9 @@ export interface InitOutput {
     readonly jsonToInsertSql: (a: number, b: number, c: number, d: number, e: number, f: number) => [number, number, number, number];
     readonly jsonToSql: (a: number, b: number, c: number, d: number, e: number, f: number) => [number, number, number, number];
     readonly mapJson: (a: number, b: number, c: number, d: number, e: number, f: number) => [number, number, number, number];
+    readonly mapJsonCompact: (a: number, b: number, c: number, d: number, e: number, f: number) => [number, number, number, number];
     readonly mapXml: (a: number, b: number, c: number, d: number, e: number, f: number) => [number, number, number, number];
+    readonly mapXmlCompact: (a: number, b: number, c: number, d: number, e: number, f: number) => [number, number, number, number];
     readonly trigramindex_add: (a: number, b: number, c: number, d: number, e: number) => void;
     readonly trigramindex_new: () => number;
     readonly trigramindex_search: (a: number, b: number, c: number, d: number) => [number, number, number, number];

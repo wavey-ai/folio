@@ -36,7 +36,7 @@ createServer(async (request, response) => {
     response.writeHead(200, {
       "Content-Length": file.size,
       "Content-Type": types.get(extname(filePath)) || "application/octet-stream",
-      "Cross-Origin-Embedder-Policy": "credentialless",
+      "Cross-Origin-Embedder-Policy": "require-corp",
       "Cross-Origin-Opener-Policy": "same-origin",
       "Cross-Origin-Resource-Policy": "same-origin",
     });
@@ -51,7 +51,7 @@ createServer(async (request, response) => {
 function respond(response, status, message) {
   response.writeHead(status, {
     "Content-Type": "text/plain; charset=utf-8",
-    "Cross-Origin-Embedder-Policy": "credentialless",
+    "Cross-Origin-Embedder-Policy": "require-corp",
     "Cross-Origin-Opener-Policy": "same-origin",
   });
   response.end(message);

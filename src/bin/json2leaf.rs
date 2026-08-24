@@ -4,7 +4,7 @@ use std::path::{Path, PathBuf};
 
 use anyhow::{Context, Result, bail};
 use clap::{Parser, ValueEnum};
-use json2leaf::{Config, Graph, InsertSqlWriter, Mapper, SqlWriter, xml_to_json};
+use json2leaf::{Config, Graph, InsertSqlWriter, Mapper, SqlWriter};
 use walkdir::WalkDir;
 
 #[derive(Clone, Copy, Debug, ValueEnum)]
@@ -137,9 +137,9 @@ fn map_file(mapper: &Mapper, path: &Path) -> Result<Vec<json2leaf::Leaf>> {
         Some(extension) if extension.eq_ignore_ascii_case("xml") => {
             let text = std::str::from_utf8(&input)
                 .with_context(|| format!("{} has invalid UTF-8 XML", path.display()))?;
-            let value =
-                xml_to_json(text).with_context(|| format!("failed to parse {}", path.display()))?;
-            Ok(mapper.map_value(&name, &value))
+            mapper
+                .map_xml(&name, text)
+                .with_context(|| format!("failed to parse {}", path.display()))
         }
         _ => mapper
             .map_json(&name, &input)

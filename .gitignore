@@ -1,3 +1,6 @@
 /target/
 /web/node_modules/
+/build/
+/design/folio-logo-contact-sheet*.png
+/HANDOVER.md
 output.sql

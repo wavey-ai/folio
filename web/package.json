@@ -2,10 +2,18 @@
   "private": true,
   "type": "module",
   "scripts": {
+    "browser:test": "node ../scripts/browser-suite.mjs --url=https://folio.wavey.ai/",
+    "browser:test:fast": "node ../scripts/browser-suite.mjs --url=https://folio.wavey.ai/ --skip-assistant",
+    "browser:test:local": "node ../scripts/browser-suite.mjs --url=http://127.0.0.1:8000/web/ --skip-assistant",
+    "browser:test:safari": "node ../scripts/safari-suite.mjs",
+    "browser:test:safari:assistant": "FOLIO_SAFARI_ASSISTANT=1 node ../scripts/safari-suite.mjs",
     "test": "node --test *.test.mjs"
   },
   "dependencies": {
-    "@wllama/wllama": "3.2.2",
-    "@wllama/wllama-compat": "3.2.2"
+    "@wllama/wllama": "3.6.0",
+    "@wllama/wllama-compat": "3.6.0"
+  },
+  "devDependencies": {
+    "puppeteer-core": "^25.8.0"
   }
 }

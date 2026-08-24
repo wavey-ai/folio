@@ -39,6 +39,14 @@ test("workers map, catalog, search, and query a document", async (context) => {
   });
   assert.ok(assistantContext.tables.some((item) => item.name === table.name));
   assert.ok(assistantContext.tables.every((item) => item.fields.length <= 14));
+  assert.ok(assistantContext.relationships.some((relationship) => relationship.type === "contains"));
+
+  const matchedValueContext = await data.call("assistantContext", {
+    tableNames: [table.name],
+    question: "Show Costs",
+  });
+  const matchedTable = matchedValueContext.tables.find((item) => item.name === table.name);
+  assert.ok(matchedTable.fields.some((field) => field.includes('="Costs"')));
 
   const plan = {
     table: table.name,
@@ -50,6 +58,23 @@ test("workers map, catalog, search, and query a document", async (context) => {
   const result = await data.call("preview", { plan });
   assert.ok(result.columns.includes("amount"));
   assert.ok(result.rows.length > 0);
+
+  const multiline = [
+    {
+      id: "evidence-132",
+      parent_id: "document",
+      name: "report__evidence",
+      path: "comment",
+      data_type: "string",
+      value: "ATG7 activates ATG12.\n\nIt's transferred to ATG10.\\source\tverified",
+    },
+  ];
+  const encoded = new TextEncoder().encode(JSON.stringify(multiline));
+  const multilineBuffer = encoded.buffer.slice(encoded.byteOffset, encoded.byteOffset + encoded.byteLength);
+  await data.call("load", { buffer: multilineBuffer }, [multilineBuffer]);
+  const batch = await data.call("postgresBatch", { offset: 0, limit: 10 });
+  assert.match(batch.sql, /E'ATG7 activates ATG12\.\\n\\nIt''s transferred to ATG10\.\\\\source\\tverified'/);
+  assert.doesNotMatch(batch.sql, /ATG12\.\n\n/);
 });
 
 function workerClient(modulePath) {

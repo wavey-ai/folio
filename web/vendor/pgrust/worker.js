@@ -35,6 +35,14 @@ let vfs = null;           // long-lived datadir — PERSISTS across runs until r
 // WebKit/Safari incl. iOS — no desktop/safari dual-asset split needed).
 const PARAMS = new URLSearchParams(self.location.search);
 const ASSET_PREFIX = (() => {
+  const configured = PARAMS.get('assetBase');
+  if (configured) {
+    const url = new URL(configured, self.location.href);
+    if (url.protocol !== 'https:' && url.protocol !== 'http:') {
+      throw new Error('PostgreSQL assetBase must use HTTP or HTTPS');
+    }
+    return url.href.replace(/\/$/, '');
+  }
   const mode = PARAMS.get('assetEncoding');
   if (mode === 'raw') return './raw/assets';
   if (mode === 'gzip') return './gzip/assets';
@@ -192,6 +200,15 @@ async function wireQuery(sql) {
   const msgs = await session.query(sql);
   // Streaming decode (#34 class): a multi-byte UTF-8 character can be split
   // across two stderr chunks; one-shot per-chunk decoding garbles it.
+  return {
+    wire: summarizeWire(msgs),
+    stderr: decodeUtf8Chunks(sessionStderr),
+  };
+}
+
+async function wireCopy(sql, chunks) {
+  sessionStderr = [];
+  const msgs = await session.copyFromStdin(sql, chunks);
   return {
     wire: summarizeWire(msgs),
     stderr: decodeUtf8Chunks(sessionStderr),
@@ -396,6 +413,61 @@ async function handleRunWire(id, sql, t0) {
   if (!r.wire.error) scheduleSnapshot();
 }
 
+async function handleCopyWire(id, sql, chunks, t0) {
+  const r = await wireCopy(sql, chunks);
+  post({
+    type: 'result',
+    id,
+    engine: 'wire',
+    wire: r.wire,
+    stderr: r.stderr,
+    exitCode: null,
+    ms: Math.round(performance.now() - t0),
+  });
+  if (!r.wire.error) scheduleSnapshot();
+}
+
+async function handleCopySingle(id, sql, chunks, t0) {
+  const copyPath = `/folio-copy-${id}.tsv`;
+  const fileSql = sql.replace(/\bFROM\s+STDIN\b/i, `FROM '${copyPath}'`);
+  if (fileSql === sql) throw new Error('COPY command must read FROM STDIN');
+
+  const node = vfs.create(copyPath);
+  node.data = new TextEncoder().encode(chunks.join(''));
+  try {
+    await handleRunSingle(id, fileSql, t0);
+  } finally {
+    vfs.unlink(copyPath);
+  }
+}
+
+async function handleLoadSingle(id, schemaSql, copySql, buffers, t0) {
+  const copyPath = `/folio-load-${id}.tsv`;
+  const fileSql = copySql.replace(/\bFROM\s+STDIN\b/i, `FROM '${copyPath}'`);
+  if (fileSql === copySql) throw new Error('COPY command must read FROM STDIN');
+
+  const node = vfs.create(copyPath);
+  node.data = joinBuffers(buffers);
+  buffers.length = 0;
+  try {
+    await handleRunSingle(id, `${schemaSql}\n${fileSql}`, t0);
+  } finally {
+    vfs.unlink(copyPath);
+  }
+}
+
+function joinBuffers(buffers) {
+  const chunks = buffers.map((buffer) => new Uint8Array(buffer));
+  const total = chunks.reduce((size, chunk) => size + chunk.byteLength, 0);
+  const joined = new Uint8Array(total);
+  let offset = 0;
+  for (const chunk of chunks) {
+    joined.set(chunk, offset);
+    offset += chunk.byteLength;
+  }
+  return joined;
+}
+
 self.onmessage = (ev) => {
   const id = ev.data.id;
   const kind = ev.data.type;
@@ -442,10 +514,25 @@ self.onmessage = (ev) => {
       }
       return;
     }
-    if (kind !== 'run') return;
+    if (kind !== 'run' && kind !== 'copy' && kind !== 'load') return;
     const t0 = performance.now();
     try {
-      if (ENGINE === 'wire' && session) await handleRunWire(id, ev.data.sql || '', t0);
+      if (kind === 'load') {
+        if (ENGINE !== 'single') throw new Error('Bulk loading is reserved for the compatibility engine');
+        await handleLoadSingle(
+          id,
+          ev.data.schemaSql || '',
+          ev.data.copySql || '',
+          ev.data.buffers || [],
+          t0,
+        );
+      } else if (kind === 'copy') {
+        if (ENGINE === 'wire' && session) {
+          await handleCopyWire(id, ev.data.sql || '', ev.data.chunks || [], t0);
+        } else {
+          await handleCopySingle(id, ev.data.sql || '', ev.data.chunks || [], t0);
+        }
+      } else if (ENGINE === 'wire' && session) await handleRunWire(id, ev.data.sql || '', t0);
       else await handleRunSingle(id, ev.data.sql || '', t0);
     } catch (e) {
       post({ type: 'error', id, message: String(e && e.stack || e) });

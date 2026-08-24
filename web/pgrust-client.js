@@ -1,3 +1,5 @@
+import { RUNTIME_ASSETS } from "./runtime-assets.js?v=20260823-2";
+
 const NUMERIC_TYPE_IDS = new Set([20, 21, 23, 26, 28, 29, 700, 701, 790, 1700]);
 
 export class PgrustClient {
@@ -5,22 +7,25 @@ export class PgrustClient {
     this.onEvent = onEvent;
     this.worker = null;
     this.ready = null;
+    this.engine = null;
     this.nextId = 0;
     this.pending = new Map();
+    this.documentPrepared = false;
   }
 
   boot() {
     if (this.ready) return this.ready;
-    const workerUrl = new URL("./vendor/pgrust/worker.js?v=20260823-10", import.meta.url);
+    const workerUrl = new URL("./vendor/pgrust/worker.js?v=20260823-14", import.meta.url);
+    workerUrl.searchParams.set("assetBase", RUNTIME_ASSETS.pgrustBase);
     this.worker = new Worker(workerUrl, { type: "module" });
     this.ready = new Promise((resolve, reject) => {
       this.worker.addEventListener("message", ({ data }) => {
+        this.onEvent(data);
         if (data.type === "status" || data.type === "build") {
-          this.onEvent(data);
           return;
         }
         if (data.type === "ready") {
-          this.onEvent(data);
+          this.engine = data.engine;
           resolve(data);
           return;
         }
@@ -36,6 +41,14 @@ export class PgrustClient {
       });
       this.worker.addEventListener("error", (event) => reject(new Error(event.message)));
     });
+    const pendingReady = this.ready;
+    pendingReady.catch(() => {
+      if (this.ready !== pendingReady) return;
+      this.worker?.terminate();
+      this.worker = null;
+      this.ready = null;
+      this.engine = null;
+    });
     return this.ready;
   }
 
@@ -44,20 +57,76 @@ export class PgrustClient {
     await this.request("reset");
   }
 
+  async prepareDocument() {
+    await this.boot();
+    if (!this.documentPrepared) {
+      this.documentPrepared = true;
+      return;
+    }
+    if (this.engine === "single") {
+      await this.restart();
+      this.documentPrepared = true;
+      return;
+    }
+    await this.reset();
+  }
+
+  async restart() {
+    const error = new Error("PostgreSQL restarted for a new document.");
+    for (const request of this.pending.values()) {
+      clearTimeout(request.timer);
+      request.reject(error);
+    }
+    this.pending.clear();
+    this.worker?.terminate();
+    this.worker = null;
+    this.ready = null;
+    this.engine = null;
+    this.documentPrepared = false;
+    await this.boot();
+  }
+
   async exec(sql) {
     await this.boot();
     return resultFromWorker(await this.request("run", { sql }));
   }
 
-  request(type, payload = {}) {
+  async copy(sql, chunks) {
+    await this.boot();
+    return resultFromWorker(await this.request("copy", { sql, chunks }));
+  }
+
+  async loadSingle(schemaSql, copySql, buffers) {
+    await this.boot();
+    if (this.engine !== "single") {
+      throw new Error("Single-user PostgreSQL loading requires the compatibility engine.");
+    }
+    return resultFromWorker(await this.request(
+      "load",
+      { schemaSql, copySql, buffers },
+      buffers,
+    ));
+  }
+
+  supportsCopy() {
+    return this.engine === "wire" || this.engine === "single";
+  }
+
+  request(type, payload = {}, transfer = [], timeoutMs = 300_000) {
     const id = ++this.nextId;
     return new Promise((resolve, reject) => {
       const timer = setTimeout(() => {
         this.pending.delete(id);
-        reject(new Error(`PostgreSQL ${type} took longer than five minutes.`));
-      }, 300_000);
+        reject(new Error(`PostgreSQL ${type} did not respond after ${Math.ceil(timeoutMs / 1_000)} seconds.`));
+      }, timeoutMs);
       this.pending.set(id, { resolve, reject, timer });
-      this.worker.postMessage({ type, id, ...payload });
+      try {
+        this.worker.postMessage({ type, id, ...payload }, transfer);
+      } catch (error) {
+        clearTimeout(timer);
+        this.pending.delete(id);
+        reject(error);
+      }
     });
   }
 }

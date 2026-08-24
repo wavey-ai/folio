@@ -182,6 +182,28 @@ export function mapJson(name, input, config_json) {
 
 /**
  * @param {string} name
+ * @param {Uint8Array} input
+ * @param {string | null} [config_json]
+ * @returns {Uint8Array}
+ */
+export function mapJsonCompact(name, input, config_json) {
+    const ptr0 = passStringToWasm0(name, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
+    const len0 = WASM_VECTOR_LEN;
+    const ptr1 = passArray8ToWasm0(input, wasm.__wbindgen_malloc);
+    const len1 = WASM_VECTOR_LEN;
+    var ptr2 = isLikeNone(config_json) ? 0 : passStringToWasm0(config_json, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
+    var len2 = WASM_VECTOR_LEN;
+    const ret = wasm.mapJsonCompact(ptr0, len0, ptr1, len1, ptr2, len2);
+    if (ret[3]) {
+        throw takeFromExternrefTable0(ret[2]);
+    }
+    var v4 = getArrayU8FromWasm0(ret[0], ret[1]).slice();
+    wasm.__wbindgen_free(ret[0], ret[1] * 1, 1);
+    return v4;
+}
+
+/**
+ * @param {string} name
  * @param {string} input
  * @param {string | null} [config_json]
  * @returns {string}
@@ -209,6 +231,28 @@ export function mapXml(name, input, config_json) {
     } finally {
         wasm.__wbindgen_free(deferred5_0, deferred5_1, 1);
     }
+}
+
+/**
+ * @param {string} name
+ * @param {Uint8Array} input
+ * @param {string | null} [config_json]
+ * @returns {Uint8Array}
+ */
+export function mapXmlCompact(name, input, config_json) {
+    const ptr0 = passStringToWasm0(name, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
+    const len0 = WASM_VECTOR_LEN;
+    const ptr1 = passArray8ToWasm0(input, wasm.__wbindgen_malloc);
+    const len1 = WASM_VECTOR_LEN;
+    var ptr2 = isLikeNone(config_json) ? 0 : passStringToWasm0(config_json, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
+    var len2 = WASM_VECTOR_LEN;
+    const ret = wasm.mapXmlCompact(ptr0, len0, ptr1, len1, ptr2, len2);
+    if (ret[3]) {
+        throw takeFromExternrefTable0(ret[2]);
+    }
+    var v4 = getArrayU8FromWasm0(ret[0], ret[1]).slice();
+    wasm.__wbindgen_free(ret[0], ret[1] * 1, 1);
+    return v4;
 }
 function __wbg_get_imports() {
     const import0 = {
@@ -241,6 +285,11 @@ const TrigramIndexFinalization = (typeof FinalizationRegistry === 'undefined')
     ? { register: () => {}, unregister: () => {} }
     : new FinalizationRegistry(ptr => wasm.__wbg_trigramindex_free(ptr, 1));
 
+function getArrayU8FromWasm0(ptr, len) {
+    ptr = ptr >>> 0;
+    return getUint8ArrayMemory0().subarray(ptr / 1, ptr / 1 + len);
+}
+
 function getStringFromWasm0(ptr, len) {
     return decodeText(ptr >>> 0, len);
 }
@@ -255,6 +304,13 @@ function getUint8ArrayMemory0() {
 
 function isLikeNone(x) {
     return x === undefined || x === null;
+}
+
+function passArray8ToWasm0(arg, malloc) {
+    const ptr = malloc(arg.length * 1, 1) >>> 0;
+    getUint8ArrayMemory0().set(arg, ptr / 1);
+    WASM_VECTOR_LEN = arg.length;
+    return ptr;
 }
 
 function passStringToWasm0(arg, malloc, realloc) {

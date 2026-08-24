@@ -1,8 +1,8 @@
 use wasm_bindgen::prelude::*;
 
 use crate::{
-    Config, Graph, Mapper, TrigramIndex as RustTrigramIndex, leaves_to_insert_sql, leaves_to_sql,
-    xml_to_json,
+    Config, Graph, Mapper, TrigramIndex as RustTrigramIndex, compact, leaves_to_insert_sql,
+    leaves_to_sql,
 };
 
 fn config(value: Option<String>) -> Result<Config, JsValue> {
@@ -55,9 +55,35 @@ pub fn map_json(name: &str, input: &str, config_json: Option<String>) -> Result<
 
 #[wasm_bindgen(js_name = mapXml)]
 pub fn map_xml(name: &str, input: &str, config_json: Option<String>) -> Result<String, JsValue> {
-    let value = xml_to_json(input).map_err(js_error)?;
-    let leaves = Mapper::new(config(config_json)?).map_value(name, &value);
+    let leaves = Mapper::new(config(config_json)?)
+        .map_xml(name, input)
+        .map_err(js_error)?;
     serde_json::to_string(&leaves).map_err(js_error)
+}
+
+#[wasm_bindgen(js_name = mapJsonCompact)]
+pub fn map_json_compact(
+    name: &str,
+    input: &[u8],
+    config_json: Option<String>,
+) -> Result<Vec<u8>, JsValue> {
+    let leaves = Mapper::new(config(config_json)?)
+        .map_json(name, input)
+        .map_err(js_error)?;
+    compact::encode(&leaves).map_err(js_error)
+}
+
+#[wasm_bindgen(js_name = mapXmlCompact)]
+pub fn map_xml_compact(
+    name: &str,
+    input: &[u8],
+    config_json: Option<String>,
+) -> Result<Vec<u8>, JsValue> {
+    let input = std::str::from_utf8(input).map_err(js_error)?;
+    let leaves = Mapper::new(config(config_json)?)
+        .map_xml(name, input)
+        .map_err(js_error)?;
+    compact::encode(&leaves).map_err(js_error)
 }
 
 #[wasm_bindgen(js_name = jsonToSql)]

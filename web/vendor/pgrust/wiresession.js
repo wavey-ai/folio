@@ -21,7 +21,16 @@
 // pgrust-wasi.js host are used.
 
 import { makeWasi, GuestExit } from './pgrust-wasi.js';
-import { WireReader, encodeStartup, encodeQuery, TERMINATE, parseMessage, canonMessage } from './wire.js';
+import {
+  WireReader,
+  encodeStartup,
+  encodeQuery,
+  encodeCopyData,
+  COPY_DONE,
+  TERMINATE,
+  parseMessage,
+  canonMessage,
+} from './wire.js';
 
 export function jspiSupported() {
   return typeof WebAssembly.Suspending === 'function' &&
@@ -114,6 +123,7 @@ export class WireSession {
       if (this.onMessage) this.onMessage(m.t, m.body);
       if (this._collector) {
         this._collector.msgs.push(m);
+        this._collector.onMessage?.(m);
         if (m.t === 'Z') {
           const c = this._collector;
           this._collector = null;
@@ -125,13 +135,14 @@ export class WireSession {
     }
   }
 
-  _collectUntilReady() {
+  _collectUntilReady(onMessage = null) {
     return new Promise((resolve, reject) => {
-      const c = { msgs: [], resolve, reject };
+      const c = { msgs: [], resolve, reject, onMessage };
       // Drain anything that arrived before the collector was armed.
       while (this._inbox.length) {
         const m = this._inbox.shift();
         c.msgs.push(m);
+        c.onMessage?.(m);
         if (m.t === 'Z') { resolve(c.msgs); return; }
       }
       if (this.dead) { reject(new WireSessionDead(`session exited (code ${this.exitCode})`)); return; }
@@ -195,6 +206,25 @@ export class WireSession {
     if (this._collector) throw new Error('a query is already in flight on this session');
     const collect = this._collectUntilReady();
     this._pushStdin(encodeQuery(sql));
+    return collect;
+  }
+
+  // COPY FROM STDIN cycle: Q(sql) -> G(CopyInResponse), then one or more
+  // d(CopyData) frames and c(CopyDone) -> C(COPY n) -> ReadyForQuery.
+  async copyFromStdin(sql, chunks) {
+    if (this.dead) throw new WireSessionDead(`session exited (code ${this.exitCode})`);
+    if (this._collector) throw new Error('a query is already in flight on this session');
+    let acceptCopy;
+    const accepted = new Promise((resolve) => { acceptCopy = resolve; });
+    const collect = this._collectUntilReady((message) => {
+      if (message.t === 'G') acceptCopy(true);
+      else if (message.t === 'E' || message.t === 'Z') acceptCopy(false);
+    });
+    this._pushStdin(encodeQuery(sql));
+    if (await accepted) {
+      for (const chunk of chunks) this._pushStdin(encodeCopyData(chunk));
+      this._pushStdin(COPY_DONE);
+    }
     return collect;
   }
 

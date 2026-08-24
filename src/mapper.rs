@@ -90,6 +90,11 @@ impl Mapper {
         Ok(self.map_value_with_seed(name, selected, input))
     }
 
+    #[cfg(feature = "xml")]
+    pub fn map_xml(&self, name: &str, input: &str) -> Result<Vec<Leaf>, quick_xml::de::DeError> {
+        crate::xml::xml_to_leaves(&self.config, name, input)
+    }
+
     #[must_use]
     pub fn map_value(&self, name: &str, value: &Value) -> Vec<Leaf> {
         let seed = serde_json::to_vec(value).unwrap_or_default();
@@ -101,6 +106,60 @@ impl Mapper {
         let root = state.ids.next();
         state.visit(name, "", root, None, value);
         state.leaves
+    }
+}
+
+#[derive(Clone, Debug)]
+pub(crate) struct Record {
+    pub(crate) id: String,
+    pub(crate) parent_id: Option<String>,
+    pub(crate) name: String,
+}
+
+pub(crate) struct LeafBuilder<'a> {
+    state: MapState<'a>,
+}
+
+impl<'a> LeafBuilder<'a> {
+    pub(crate) fn new(config: &'a Config, name: &str, seed: &[u8]) -> Self {
+        Self {
+            state: MapState::new(config, name, seed),
+        }
+    }
+
+    pub(crate) fn root(&mut self, name: &str) -> Record {
+        let record = Record {
+            id: self.state.ids.next(),
+            parent_id: None,
+            name: name.to_owned(),
+        };
+        self.state.ensure_tree(&record.id, None, &record.name);
+        record
+    }
+
+    pub(crate) fn child(&mut self, parent: &Record, path: &str) -> Record {
+        let record = Record {
+            id: self.state.ids.next(),
+            parent_id: Some(parent.id.clone()),
+            name: format!("{}__{path}", parent.name),
+        };
+        self.state
+            .ensure_tree(&record.id, record.parent_id.as_deref(), &record.name);
+        record
+    }
+
+    pub(crate) fn add_string(&mut self, record: &Record, path: &str, value: String) {
+        self.state.add_leaf(
+            &record.name,
+            path,
+            record.id.clone(),
+            record.parent_id.clone(),
+            Value::String(value),
+        );
+    }
+
+    pub(crate) fn finish(self) -> Vec<Leaf> {
+        self.state.leaves
     }
 }
 

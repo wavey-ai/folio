@@ -36,11 +36,23 @@ export function encodeStartup(params) {
 
 export function encodeQuery(sql) {
   const body = enc.encode(sql);
-  const buf = new Uint8Array(1 + 4 + body.length + 1);
-  buf[0] = 0x51; // 'Q'
-  new DataView(buf.buffer).setInt32(1, 4 + body.length + 1, false);
-  buf.set(body, 5);
-  buf[5 + body.length] = 0;
+  const terminated = new Uint8Array(body.length + 1);
+  terminated.set(body);
+  return encodeFrontendMessage("Q", terminated);
+}
+
+export function encodeCopyData(data) {
+  return encodeFrontendMessage("d", typeof data === "string" ? enc.encode(data) : data);
+}
+
+export const COPY_DONE = encodeFrontendMessage("c");
+
+function encodeFrontendMessage(type, body = new Uint8Array()) {
+  const payload = body instanceof Uint8Array ? body : new Uint8Array(body);
+  const buf = new Uint8Array(1 + 4 + payload.length);
+  buf[0] = type.charCodeAt(0);
+  new DataView(buf.buffer).setInt32(1, 4 + payload.length, false);
+  buf.set(payload, 5);
   return buf;
 }
 

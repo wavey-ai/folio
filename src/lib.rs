@@ -1,5 +1,7 @@
 //! Convert nested documents into flat leaf rows with explicit tree links.
 
+#[cfg(any(all(target_arch = "wasm32", feature = "wasm"), test))]
+mod compact;
 mod graph;
 mod mapper;
 mod redactor;

@@ -63,7 +63,7 @@ wasm-pack build --target web --no-default-features --features wasm
 The bindings export `mapJson`, `mapXml`, `jsonToSql`, `jsonToInsertSql`, `jsonToDot`, and `TrigramIndex`.
 Each mapping function accepts a source name, a document string, and an optional configuration string.
 
-## Folio Studio
+## Folio
 
 Folio is the browser studio for json2Leaf.
 It turns each document into a traversable schema for reporting.
@@ -88,9 +88,9 @@ The local preview lets you check each plan before you use its SQL.
 Dedicated workers map documents, prepare table data, and search elements.
 The trigram worker builds its postings when the first search starts.
 It reuses the postings for each later search.
-Use the 30 MB Reactome BioPAX sample to explore pathways, reactions, proteins, evidence, and cross-references.
-The initial report joins pathways to component references through `parent_id`.
-It then resolves each reference to the related pathway record.
+Use the 30 MB Discogs sample to explore releases, artists, labels, genres, styles, tracks, credits, and identifiers.
+The initial report joins each release to its nested music records through `parent_id`.
+It groups Electronic releases by artist and reports their tracks, labels, and styles.
 
 ## pgrust Wasm test
 

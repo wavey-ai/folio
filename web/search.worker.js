@@ -1,4 +1,5 @@
 import initJson2Leaf, { TrigramIndex } from "./pkg/json2leaf.js?v=20260823-5";
+import { RUNTIME_ASSETS } from "./runtime-assets.js?v=20260823-2";
 
 const wasmReady = initializeWasm();
 
@@ -95,6 +96,6 @@ async function initializeWasm() {
     return;
   }
   await initJson2Leaf({
-    module_or_path: new URL("./pkg/json2leaf_bg.wasm?v=20260823-5", import.meta.url),
+    module_or_path: RUNTIME_ASSETS.json2leafWasm,
   });
 }

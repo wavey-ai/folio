@@ -3,42 +3,73 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <meta name="theme-color" content="#e8ddc7" />
-    <link rel="icon" href="./favicon.svg" type="image/svg+xml" />
+    <meta name="theme-color" content="#15131d" />
+    <link rel="icon" href="./favicon.svg?v=20260823-2" type="image/svg+xml" />
     <meta
       name="description"
       content="Turn JSON and XML documents into fully traversable schemas and PostgreSQL reports."
     />
-    <title>Folio Studio</title>
-    <link rel="stylesheet" href="./styles.css?v=20260823-21" />
+    <title>Folio</title>
+    <link rel="stylesheet" href="./styles.css?v=20260824-62" />
   </head>
   <body>
     <header class="topbar">
-      <a class="brand" href="#" aria-label="Folio Studio home">
-        <span class="brand-mark" aria-hidden="true"><i></i><i></i><i></i></span>
-        <span>Folio <em>Studio</em></span>
+      <a class="brand" href="#" aria-label="Folio home">
+        <img class="brand-mark" src="./folio-mark.svg" alt="" />
+        <span>Folio</span>
       </a>
-      <div class="engine-state" id="engine-state">
-        <span aria-hidden="true"></span>
-        <strong>Preparing Folio</strong>
+      <div class="topbar-actions">
+        <a href="#schema-guide">Universal schema</a>
+        <button class="saved-work-button" id="saved-work-button" type="button">
+          Saved work <span id="saved-work-count">0</span>
+        </button>
+        <div class="engine-state" id="engine-state">
+          <span aria-hidden="true"></span>
+          <strong>Starting Folio</strong>
+        </div>
       </div>
     </header>
 
     <main>
       <section class="hero" aria-label="Open a document">
         <div class="product-promise">
-          <h1>Turn any document into a fully traversable schema, instantly.</h1>
-          <p>Explore every path. Build reports from any field.</p>
-          <ol class="prep-stages" id="prep-stages" aria-label="Document preparation">
-            <li data-stage="read"><i aria-hidden="true"></i><span>Read document</span></li>
-            <li data-stage="map"><i aria-hidden="true"></i><span>Map structure</span></li>
-            <li data-stage="catalog"><i aria-hidden="true"></i><span>Build tables</span></li>
-            <li data-stage="index"><i aria-hidden="true"></i><span>Index elements</span></li>
-          </ol>
+          <p class="hero-kicker"><span>Local document intelligence</span> JSON + XML</p>
+          <h1>Turn structure into answers.<em>For JSON and XML.</em></h1>
+          <p class="hero-summary">
+            Import a document and build reports from every value.
+          </p>
+          <div class="local-promise">
+            <span class="local-promise-mark" aria-hidden="true">
+              <svg viewBox="0 0 32 32" focusable="false">
+                <path class="local-shield" d="M16 2.5 27 6.6v8.2c0 6.9-4.3 11.5-11 14.2C9.3 26.3 5 21.7 5 14.8V6.6L16 2.5Z" />
+                <path class="local-wall" d="M8.8 10.4h14.4M7.6 14.5h16.8M8.8 18.6h14.4M13 7.8v2.6m5.8 0v4.1M12 14.5v4.1m7.4-4.1v4.1m-6.2 0v3.2m6.2-3.2v3.2" />
+              </svg>
+            </span>
+            <div>
+              <a class="pgrust-credit" href="https://pgrust.com/" target="_blank" rel="noreferrer">
+                <span>Powered by</span>
+                <strong>pgrust</strong>
+                <i aria-hidden="true">↗</i>
+              </a>
+              <p>A local WebAssembly database keeps your data private and your queries fast.</p>
+            </div>
+          </div>
+          <ul class="hero-proof" aria-label="Folio capabilities">
+            <li><i aria-hidden="true"></i>Large documents</li>
+            <li><i aria-hidden="true"></i>Nested joins</li>
+            <li><i aria-hidden="true"></i>CSV reports</li>
+          </ul>
         </div>
+
         <div class="import-card" id="document-prep">
-          <label class="file-control" for="file-input">
-            <span>Choose a JSON or XML document</span>
+          <div class="import-heading">
+            <span>01</span>
+            <div><p class="panel-kicker">Start here</p><h2>Open a document</h2></div>
+          </div>
+          <label class="file-control" id="document-dropzone" for="file-input">
+            <span class="upload-mark" aria-hidden="true">↗</span>
+            <strong>Drop JSON or XML here</strong>
+            <small>or choose a document from this device</small>
             <input
               id="file-input"
               type="file"
@@ -46,235 +77,355 @@
             />
           </label>
           <div class="sample-actions">
-            <button class="text-button" id="reactome-button" type="button">Explore 30 MB of pathways</button>
+            <div class="sample-copy"><strong>30 MB Discogs XML</strong></div>
+            <button class="demo-button" id="demo-button" type="button">
+              Try on a demo dataset <i aria-hidden="true">→</i>
+            </button>
           </div>
-          <p id="document-status" role="status">Preparing the pathway document…</p>
+        </div>
+      </section>
+
+      <div class="activity-anchor" id="activity-anchor" aria-hidden="true"></div>
+      <section class="activity-center" id="activity-center" aria-labelledby="activity-title">
+        <div class="activity-status" id="activity-status">
+          <div class="activity-current" id="activity-current" data-state="ready">
+            <span class="activity-orb" aria-hidden="true"><i></i></span>
+            <div class="activity-current-copy">
+              <p class="panel-kicker">Workspace activity</p>
+              <div class="activity-current-message">
+                <h2 id="activity-title">Ready for a document</h2>
+                <p id="activity-detail">Drop JSON or XML above, or load the demo dataset.</p>
+              </div>
+            </div>
+            <div class="activity-current-actions">
+              <time id="activity-elapsed" hidden>0s</time>
+              <button class="activity-toggle" id="activity-toggle" type="button" aria-expanded="false">
+                Activity <span id="activity-count">0</span>
+              </button>
+            </div>
+          </div>
+          <div class="activity-meter" id="activity-meter" aria-hidden="true"><i id="activity-progress-bar"></i></div>
+        </div>
+
+        <div class="activity-services">
+          <section class="service-card document-service ready" id="document-service">
+            <div class="service-heading">
+              <span class="service-icon document-icon" aria-hidden="true"></span>
+              <div><strong>Document</strong><span id="document-status" role="status">Choose JSON, XML, or the demo dataset</span></div>
+              <em id="document-service-state">Ready</em>
+            </div>
+            <ol class="prep-stages" id="prep-stages" aria-label="Document preparation">
+              <li data-stage="read"><i aria-hidden="true"></i><span>Read</span></li>
+              <li data-stage="map"><i aria-hidden="true"></i><span>Map</span></li>
+              <li data-stage="catalog"><i aria-hidden="true"></i><span>Tables</span></li>
+              <li data-stage="index"><i aria-hidden="true"></i><span>Index</span></li>
+            </ol>
+          </section>
+
+          <section class="service-card model-loader" id="model-loader">
+            <div class="service-heading">
+              <span class="service-icon model-icon" aria-hidden="true"></span>
+              <div class="model-loader-copy"><strong id="model-status">Local assistant</strong><span id="model-progress-copy">Qwen3.5 · 533 MB on first use</span></div>
+              <em id="model-service-state">On demand</em>
+            </div>
+            <div class="service-action-row">
+              <div class="model-progress" aria-hidden="true"><i id="model-progress-bar"></i></div>
+              <button class="service-button" id="model-load-button" type="button">Prepare</button>
+            </div>
+          </section>
+
+          <aside class="service-card browser-check" id="browser-check" role="status">
+            <div class="service-heading">
+              <span class="service-icon runtime-icon" aria-hidden="true"></span>
+              <div><strong id="browser-check-title">Checking runtime</strong><span id="browser-check-status">Finding the fastest local mode…</span></div>
+              <em id="runtime-service-state">Checking</em>
+            </div>
+            <ol id="browser-check-guidance" hidden></ol>
+          </aside>
+
+          <section class="service-card postgres-runtime" id="postgres-runtime">
+            <div class="service-heading">
+              <span class="service-icon database-icon" aria-hidden="true"></span>
+              <div><strong>PostgreSQL</strong><span id="postgres-runtime-status">Starting on page load</span></div>
+              <em id="postgres-runtime-state">Starting</em>
+            </div>
+          </section>
+        </div>
+
+        <div class="activity-log-panel" id="activity-log-panel" hidden>
+          <div class="activity-log-heading">
+            <div><strong>What Folio is doing</strong><span>Readable milestones with technical details when you need them.</span></div>
+            <button class="text-button compact" id="copy-activity-log" type="button">Copy diagnostics</button>
+          </div>
+          <ol class="activity-log" id="activity-log"></ol>
         </div>
       </section>
 
       <section class="ask-panel" aria-labelledby="ask-title">
         <div class="ask-heading">
           <div>
-            <p class="panel-kicker">Local query assistant</p>
-            <h2 id="ask-title">Ask Folio</h2>
-            <p>Describe the report you want. Folio will find the schema, write PostgreSQL, and check the query.</p>
+            <p class="panel-kicker">Local document analyst</p>
+            <h2 id="ask-title">Ask a question. Folio writes the SQL.</h2>
           </div>
-          <span class="model-badge">Qwen3.5 · 0.8B · Q4</span>
+          <span class="model-badge"><i aria-hidden="true"></i> Runs locally</span>
         </div>
 
-        <div class="model-loader" id="model-loader">
-          <div class="model-loader-copy">
-            <strong id="model-status">Local model available</strong>
-            <span id="model-progress-copy">The first use downloads about 533 MB. Your browser saves it for later.</span>
+        <div class="assistant-conversation-column">
+          <div class="schema-chat" id="schema-chat" aria-live="polite">
+            <article class="chat-message assistant">
+              <span class="chat-avatar" aria-hidden="true">F</span>
+              <div><strong>Folio</strong><p>Open a document, then ask how its records, fields, and relationships fit together.</p></div>
+            </article>
           </div>
-          <div class="model-progress" aria-hidden="true">
-            <i id="model-progress-bar"></i>
-          </div>
-          <button class="secondary-button" id="model-load-button" type="button">Prepare local model</button>
-        </div>
 
-        <aside class="browser-check" id="browser-check" role="status">
-          <div>
-            <strong id="browser-check-title">Checking this browser</strong>
-            <p id="browser-check-status">Checking WebGPU and local model support…</p>
-          </div>
-          <ol id="browser-check-guidance" hidden></ol>
-        </aside>
-
-        <form class="ask-form" id="ask-form">
-          <label for="ask-input">What do you want to know?</label>
-          <div class="ask-control">
-            <textarea
-              id="ask-input"
-              rows="2"
-            >Which proteins participate in reactions across the greatest number of distinct pathways? Show each protein's name, pathway count, reaction count, and pathway names. Include proteins found in at least three pathways and sort by pathway count.</textarea>
-            <div class="ask-actions">
-              <button class="primary-button" id="ask-button" type="submit">Write query</button>
-              <button class="secondary-button" id="own-model-button" type="button">Use your model</button>
+          <form class="ask-form" id="ask-form">
+            <label for="ask-input">Ask Folio about this document</label>
+            <div class="ask-control">
+              <textarea id="ask-input" rows="3" placeholder="How do these records connect?"></textarea>
+              <div class="ask-actions">
+                <span class="assistant-inline-status" id="assistant-inline-status" role="status" aria-live="polite" hidden>
+                  <i aria-hidden="true"></i>
+                  <span id="assistant-inline-status-copy"></span>
+                </span>
+                <button class="primary-button" id="chat-button" type="submit" disabled>Ask Folio <i aria-hidden="true">→</i></button>
+                <button class="secondary-button" id="ask-button" type="button" hidden disabled>Retry query</button>
+                <button class="secondary-button" id="own-model-button" type="button" disabled>Use your model</button>
+              </div>
             </div>
-          </div>
-        </form>
-
-        <div class="assistant-flow" id="assistant-flow" aria-live="polite">
-          <span data-assistant-stage="schema">Find schema</span>
-          <i aria-hidden="true">→</i>
-          <span data-assistant-stage="plan">Plan query</span>
-          <i aria-hidden="true">→</i>
-          <span data-assistant-stage="check">Check PostgreSQL</span>
-          <i aria-hidden="true">→</i>
-          <span data-assistant-stage="repair">Repair</span>
+          </form>
+          <p class="assistant-speed-note">The local model can take several minutes. Choose <strong>Use your model</strong>, then paste the prepared prompt into Claude or ChatGPT for a SQL query in seconds.</p>
         </div>
-        <div class="assistant-answer" id="assistant-answer" hidden></div>
+
+        <div class="assistant-feedback" id="assistant-feedback" hidden>
+          <div class="assistant-flow" id="assistant-flow" aria-live="polite">
+            <span data-assistant-stage="schema"><i></i>Find schema</span><b aria-hidden="true"></b>
+            <span data-assistant-stage="plan"><i></i>Write query</span><b aria-hidden="true"></b>
+            <span data-assistant-stage="check"><i></i>Check PostgreSQL</span><b aria-hidden="true"></b>
+            <span data-assistant-stage="repair"><i></i>Refine</span>
+          </div>
+          <div class="assistant-answer" id="assistant-answer" hidden></div>
+        </div>
       </section>
 
       <dialog class="own-model-dialog" id="own-model-dialog">
         <div class="dialog-heading">
-          <div>
-            <p class="panel-kicker">Use your model</p>
-            <h2>Copy this prompt</h2>
-          </div>
+          <div><p class="panel-kicker">Use your model</p><h2>Copy the complete prompt</h2></div>
           <button class="text-button compact" id="close-own-model" type="button">Close</button>
         </div>
-        <p>Paste this prompt into ChatGPT, Claude, or another model. Then paste its PostgreSQL into the editable query below.</p>
+        <p>Paste this into ChatGPT, Claude, or another model. Then paste its PostgreSQL into the editor.</p>
         <textarea id="own-model-prompt" rows="18" spellcheck="false" aria-label="Prompt for your model"></textarea>
-        <div class="dialog-actions">
-          <button class="primary-button" id="copy-own-model-prompt" type="button">Copy prompt</button>
+        <div class="dialog-actions"><button class="primary-button" id="copy-own-model-prompt" type="button">Copy prompt</button></div>
+      </dialog>
+
+      <dialog class="saved-work-dialog" id="saved-work-dialog">
+        <div class="dialog-heading saved-work-heading">
+          <div><p class="panel-kicker">This browser only</p><h2 id="saved-work-title">Saved work</h2></div>
+          <button class="secondary-button saved-dialog-close" id="close-saved-work" type="button">Close</button>
+        </div>
+        <p class="saved-work-intro">Keep useful queries and report results on this device.</p>
+        <form class="saved-work-form" id="saved-work-form" hidden>
+          <label for="saved-work-name">Name</label>
+          <div class="saved-work-form-row">
+            <input id="saved-work-name" type="text" maxlength="80" autocomplete="off" />
+            <button class="primary-button" id="confirm-save-work" type="submit">Save</button>
+            <button class="secondary-button" id="cancel-save-work" type="button">Cancel</button>
+          </div>
+          <p class="saved-work-error" id="saved-work-error" role="alert" hidden></p>
+        </form>
+        <div class="saved-work-library">
+          <section aria-labelledby="saved-query-title">
+            <div class="saved-section-heading">
+              <h3 id="saved-query-title">Queries</h3>
+              <span class="count-badge subtle" id="saved-query-count">0</span>
+            </div>
+            <div class="saved-work-list" id="saved-query-list"></div>
+          </section>
+          <section aria-labelledby="saved-report-title">
+            <div class="saved-section-heading">
+              <h3 id="saved-report-title">Reports</h3>
+              <span class="count-badge subtle" id="saved-report-count">0</span>
+            </div>
+            <div class="saved-work-list" id="saved-report-list"></div>
+          </section>
         </div>
       </dialog>
 
       <section class="workspace" id="workspace" aria-label="Document query workspace">
         <aside class="schema-panel panel" aria-labelledby="schema-title">
           <div class="panel-heading">
-            <div>
-              <p class="panel-kicker">Inferred structure</p>
-              <h2 id="schema-title">Tables</h2>
-            </div>
+            <div><p class="panel-kicker">Inferred structure</p><h2 id="schema-title">Tables</h2></div>
             <span class="count-badge" id="table-count">0</span>
           </div>
           <label class="table-search">
+            <span class="search-mark" aria-hidden="true"></span>
             <span class="visually-hidden">Search tables, elements, and fields</span>
-            <input
-              id="table-search"
-              type="search"
-              autocomplete="off"
-              placeholder="Find elements or fields"
-            />
+            <input id="table-search" type="search" autocomplete="off" placeholder="Find anything" />
           </label>
-          <div class="table-list" id="table-list"></div>
+          <section class="schema-starters" aria-labelledby="schema-starters-title">
+            <div class="schema-starters-heading">
+              <strong id="schema-starters-title">Explore raw schema</strong>
+              <span>Run a starting query</span>
+            </div>
+            <div class="schema-starter-list">
+              <button type="button" data-schema-query="rows" disabled>
+                <span>Preview nodes</span><code>SELECT * FROM nodes LIMIT 10;</code><i aria-hidden="true">→</i>
+              </button>
+              <button type="button" data-schema-query="records" disabled>
+                <span>Record types</span><code>Count records by name</code><i aria-hidden="true">→</i>
+              </button>
+              <button type="button" data-schema-query="fields" disabled>
+                <span>Fields</span><code>List paths and types</code><i aria-hidden="true">→</i>
+              </button>
+              <button type="button" data-schema-query="relationships" disabled>
+                <span>Relationships</span><code>Follow parent_id links</code><i aria-hidden="true">→</i>
+              </button>
+            </div>
+          </section>
+          <div class="table-list" id="table-list"><p class="empty-table-search">Open a document to see its inferred tables.</p></div>
         </aside>
 
-        <section class="builder-panel panel" aria-labelledby="builder-title">
-          <div class="panel-heading">
-            <div>
-              <p class="panel-kicker">Visual query</p>
-              <h2 id="builder-title" aria-live="polite">Ask this document</h2>
+        <div class="workbench">
+          <section class="builder-panel panel" aria-labelledby="builder-title">
+            <div class="panel-heading builder-heading">
+              <div><p class="panel-kicker">Build or edit</p><h2 id="builder-title" aria-live="polite">Open a document to start</h2></div>
             </div>
-            <button class="primary-button" id="run-button" type="button">Run preview</button>
-          </div>
 
-          <div class="builder-grid">
-            <label>
-              <span>Table</span>
-              <select id="table-select"></select>
-            </label>
-            <label>
-              <span>Operation</span>
-              <select id="operation-select">
-                <option value="rows">Show rows</option>
-                <option value="count">Count rows</option>
-                <option value="sum">Add a number field</option>
-                <option value="average">Average a number field</option>
-                <option value="tree">Show the document tree</option>
-              </select>
-            </label>
-          </div>
+            <div class="builder-content">
+              <div class="visual-builder">
+                <div class="builder-grid">
+                  <label><span>Table</span><select id="table-select" disabled><option>Open a document first</option></select></label>
+                  <label>
+                    <span>Report</span>
+                    <select id="operation-select" disabled>
+                      <option value="rows">Show rows</option>
+                      <option value="count">Count rows</option>
+                      <option value="sum">Add a number field</option>
+                      <option value="average">Average a number field</option>
+                      <option value="tree">Show the document tree</option>
+                    </select>
+                  </label>
+                </div>
+                <p class="query-prompt" id="query-prompt" hidden></p>
+                <fieldset class="field-picker" id="field-picker"><legend>Include fields</legend><div id="field-options"></div></fieldset>
+                <div class="filter-block" id="filter-block">
+                  <div class="section-label"><span>Filter rows</span><button class="text-button compact" id="clear-filter" type="button">Clear</button></div>
+                  <div class="filter-grid">
+                    <select id="filter-field" aria-label="Filter field" disabled><option value="">Choose a field</option></select>
+                    <select id="filter-operator" aria-label="Filter operator" disabled>
+                      <option value="equals">equals</option><option value="contains">contains</option>
+                      <option value="greater">is greater than</option><option value="less">is less than</option>
+                    </select>
+                    <input id="filter-value" type="text" placeholder="Value" aria-label="Filter value" disabled />
+                  </div>
+                </div>
+              </div>
 
-          <p class="query-prompt" id="query-prompt" hidden></p>
+              <div class="sql-column">
+                <div class="sql-block user-sql-block">
+                  <div class="section-label sql-label">
+                    <div class="sql-title">
+                      <strong>Your PostgreSQL</strong>
+                      <span class="sql-preparation-status" id="sql-preparation-status" role="status" aria-live="polite" hidden><i aria-hidden="true"></i><span>Preparing SQL</span></span>
+                    </div>
+                    <div class="sql-actions">
+                      <button class="text-button compact" id="clear-sql-button" type="button" disabled>Clear</button>
+                      <button class="text-button compact" id="copy-button" type="button" disabled>Copy</button>
+                      <button class="secondary-button save-inline-button" id="save-query" type="button" disabled>Save</button>
+                      <button class="primary-button compact-action" id="run-button" type="button" disabled>Run my query <i aria-hidden="true">→</i></button>
+                    </div>
+                  </div>
+                  <textarea id="sql-output" rows="9" wrap="off" spellcheck="false" aria-label="Your editable PostgreSQL query" placeholder="Write PostgreSQL here. Open a document to run it."></textarea>
+                </div>
 
-          <fieldset class="field-picker" id="field-picker">
-            <legend>Fields</legend>
-            <div id="field-options"></div>
-          </fieldset>
-
-          <div class="filter-block" id="filter-block">
-            <div class="section-label">
-              <span>Filter</span>
-              <button class="text-button compact" id="clear-filter" type="button">Clear</button>
+                <div class="sql-block agent-sql-block" id="agent-sql-block">
+                  <div class="section-label sql-label">
+                    <div class="sql-title">
+                      <strong>Folio’s PostgreSQL</strong>
+                      <span class="read-only-badge">Read only</span>
+                      <span class="sql-preparation-status" id="agent-sql-status" role="status" aria-live="polite" hidden><i aria-hidden="true"></i><span>Waiting for a question</span></span>
+                    </div>
+                    <div class="sql-actions">
+                      <button class="text-button compact" id="copy-agent-sql" type="button" disabled>Copy</button>
+                      <button class="primary-button compact-action" id="run-agent-button" type="button" disabled>Run Folio query <i aria-hidden="true">→</i></button>
+                    </div>
+                  </div>
+                  <textarea id="agent-sql-output" rows="9" wrap="off" spellcheck="false" aria-label="Folio generated PostgreSQL query" placeholder="Ask Folio a question to generate PostgreSQL here." readonly></textarea>
+                </div>
+              </div>
             </div>
-            <div class="filter-grid">
-              <select id="filter-field" aria-label="Filter field">
-                <option value="">Choose a field</option>
-              </select>
-              <select id="filter-operator" aria-label="Filter operator">
-                <option value="equals">equals</option>
-                <option value="contains">contains</option>
-                <option value="greater">is greater than</option>
-                <option value="less">is less than</option>
-              </select>
-              <input id="filter-value" type="text" placeholder="Value" aria-label="Filter value" />
-            </div>
-          </div>
+          </section>
 
-          <div class="sql-block">
-            <div class="section-label">
-              <span>Generated PostgreSQL</span>
-              <button class="text-button compact" id="copy-button" type="button">Copy SQL</button>
+          <section class="result-panel panel" aria-labelledby="result-title">
+            <div class="panel-heading report-heading">
+              <div><p class="panel-kicker">Your report</p><h2 id="result-title">Result</h2></div>
+              <div class="report-actions">
+                <span class="count-badge subtle" id="row-count">0 rows</span>
+                <button class="secondary-button" id="save-report" type="button" disabled>Save report</button>
+                <button class="download-button" id="download-csv" type="button" disabled><span aria-hidden="true">↓</span> Download CSV</button>
+              </div>
             </div>
-            <textarea
-              id="sql-output"
-              rows="18"
-              spellcheck="false"
-              aria-label="Editable PostgreSQL query"
-            ></textarea>
-          </div>
-        </section>
-
-        <section class="result-panel panel" aria-labelledby="result-title">
-          <div class="panel-heading">
-            <div>
-              <p class="panel-kicker">Local preview</p>
-              <h2 id="result-title">Result</h2>
+            <div class="result-wrap" id="result-wrap">
+              <div class="empty-result"><span aria-hidden="true">↳</span><div><strong>Your report will land here</strong><p>Choose fields, then run the preview.</p></div></div>
             </div>
-            <span class="count-badge subtle" id="row-count">0 rows</span>
-          </div>
-          <div class="result-wrap" id="result-wrap">
-            <div class="empty-result">
-              <span aria-hidden="true">↳</span>
-              <p>Choose fields, then run the preview.</p>
-            </div>
-          </div>
-        </section>
+          </section>
+        </div>
       </section>
 
-      <section class="schema-guide" aria-labelledby="schema-guide-title">
-        <div>
-          <p class="panel-kicker">One schema for every document</p>
-          <h2 id="schema-guide-title">How Folio stores your document</h2>
-          <p>
-            Every scalar value becomes one row in <code>nodes</code>. Rows with the same
-            <code>name</code> and <code>id</code> form one inferred record.
-          </p>
-        </div>
-        <dl class="schema-columns">
-          <div><dt>id</dt><dd>Identifies one inferred record.</dd></div>
-          <div><dt>parent_id</dt><dd>Connects a child record to its container.</dd></div>
-          <div><dt>name</dt><dd>Names the inferred table.</dd></div>
-          <div><dt>path</dt><dd>Names the scalar field.</dd></div>
-          <div><dt>data_type</dt><dd>Records string, number, or boolean.</dd></div>
-          <div><dt>value</dt><dd>Contains the scalar value as text.</dd></div>
-        </dl>
-        <div class="schema-patterns">
-          <div>
-            <strong>Build a record</strong>
-            <pre><code>SELECT id, parent_id,
+      <section class="schema-guide" id="schema-guide" aria-labelledby="schema-guide-title">
+        <header class="schema-guide-heading">
+          <p class="panel-kicker">Universal document schema</p>
+          <h2 id="schema-guide-title">One schema for every document</h2>
+        </header>
+        <div class="schema-guide-content">
+          <div class="schema-intro">
+            <p>Every scalar value becomes one row in <code>nodes</code>. Rows with the same <code>name</code> and <code>id</code> form one inferred record.</p>
+            <p>XML attributes use paths that start with <code>@</code>. Element text uses <code>$text</code>. Each row keeps the element hierarchy through <code>parent_id</code>.</p>
+            <h3>Every value keeps six coordinates</h3>
+            <div class="schema-table-wrap">
+              <table class="schema-columns">
+                <thead><tr><th>id</th><th>parent_id</th><th>name</th><th>path</th><th>data_type</th><th>value</th></tr></thead>
+                <tbody><tr><td>One inferred record</td><td>Its containing record</td><td>The inferred table</td><td>The scalar field</td><td>String, number, or boolean</td><td>The original scalar text</td></tr></tbody>
+              </table>
+            </div>
+          </div>
+          <div class="schema-examples">
+            <h3>Query the universal schema</h3>
+            <div class="schema-patterns">
+              <div><strong>Build complete records</strong><pre><code>SELECT id, parent_id,
   max(value) FILTER (WHERE path = 'name') AS name
 FROM nodes
 WHERE name = 'document__items'
-GROUP BY id, parent_id;</code></pre>
-          </div>
-          <div>
-            <strong>Follow the document structure</strong>
-            <pre><code>SELECT child.value, parent.value
+GROUP BY id, parent_id;</code></pre></div>
+              <div><strong>Follow nested relationships</strong><pre><code>SELECT child.value, parent.value
 FROM nodes AS child
 JOIN nodes AS parent
-  ON child.parent_id = parent.id;</code></pre>
+  ON child.parent_id = parent.id;</code></pre></div>
+            </div>
           </div>
         </div>
       </section>
     </main>
 
     <footer class="site-footer">
-      <div class="footer-identity">
-        <strong>Folio Studio</strong>
-        <span>Document reporting</span>
-      </div>
-      <p>JSON + XML <i aria-hidden="true">→</i> PostgreSQL</p>
+      <div class="footer-identity"><strong>Folio</strong><span>Turn structure into answers.</span></div>
+      <a class="footer-github" href="https://github.com/wavey-ai/json2Leaf" target="_blank" rel="noreferrer">
+        <span>GitHub</span>
+        <strong>wavey-ai/json2Leaf</strong>
+        <i aria-hidden="true">↗</i>
+      </a>
       <nav aria-label="Project links">
-        <a href="https://github.com/wavey-ai/json2Leaf" target="_blank" rel="noreferrer">
-          <span>GitHub:</span> json2Leaf <i aria-hidden="true">↗</i>
-        </a>
-        <a href="https://wavey.ai" target="_blank" rel="noreferrer">
-          wavey.ai <i aria-hidden="true">↗</i>
+        <a class="wavey-credit" href="https://wavey.ai" target="_blank" rel="noreferrer" aria-label="Folio by wavey.ai">
+          <span class="wavey-credit-icon" aria-hidden="true">
+            <span class="wavey-credit-backlight"></span>
+            <picture class="wavey-credit-picture">
+              <source srcset="./wavey-10cee1b60b2c.avif" type="image/avif" />
+              <source srcset="./wavey-7c0f05bb2a40.webp" type="image/webp" />
+              <img class="wavey-credit-image" src="./wavey.png" alt="" width="1024" height="1024" />
+            </picture>
+            <span class="wavey-credit-scan"></span>
+            <span class="wavey-credit-pixels" data-wavey-pixels></span>
+          </span>
+          <span class="wavey-credit-label">by <strong>wavey.ai</strong> <i aria-hidden="true">↗</i></span>
         </a>
       </nav>
     </footer>
@@ -282,14 +433,12 @@ JOIN nodes AS parent
     <template id="table-template">
       <button class="table-item" type="button">
         <span class="table-icon" aria-hidden="true"></span>
-        <span class="table-copy">
-          <strong></strong>
-          <small></small>
-        </span>
+        <span class="table-copy"><strong></strong><small></small></span>
         <span class="table-arrow" aria-hidden="true">→</span>
       </button>
     </template>
 
-    <script type="module" src="./app.js?v=20260823-21"></script>
+    <script type="module" src="./wavey-credit.js?v=20260823-1"></script>
+    <script type="module" src="./app.js?v=20260824-57"></script>
   </body>
 </html>

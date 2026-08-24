@@ -19,7 +19,10 @@ async function checkCapabilities(pageIsolated) {
     : null;
   const features = adapter ? Array.from(adapter.features).sort() : [];
   const shaderF16 = features.includes("shader-f16");
-  const webgpuReady = secureContext && Boolean(adapter) && shaderF16;
+  const gpuProbe = adapter && shaderF16
+    ? await probeWebGPU(adapter)
+    : { ready: false, error: "" };
+  const webgpuReady = secureContext && gpuProbe.ready;
   const guidance = [];
   const sharedMemory = typeof SharedArrayBuffer !== "undefined";
   const isolated = Boolean(pageIsolated ?? self.crossOriginIsolated);
@@ -30,6 +33,12 @@ async function checkCapabilities(pageIsolated) {
   if (secureContext && (!isolated || !sharedMemory)) {
     guidance.push("Start Folio with node scripts/serve-web.mjs, then reload this page.");
   }
+  if (secureContext && webgpuApi && adapter && !shaderF16) {
+    guidance.push("Use a browser profile that exposes 16-bit GPU shaders.");
+  }
+  if (secureContext && shaderF16 && !gpuProbe.ready) {
+    guidance.push("Restart this browser, then let Folio check the GPU again.");
+  }
 
   return {
     browser: safari ? `Safari ${safariMatch[1]}` : browserName(userAgent),
@@ -39,12 +48,52 @@ async function checkCapabilities(pageIsolated) {
     adapter: Boolean(adapter),
     shaderF16,
     webgpuReady,
+    gpuProbeError: gpuProbe.error,
     features,
+    adapterInfo: adapter ? readAdapterInfo(adapter) : null,
+    adapterLimits: adapter ? {
+      maxBufferSize: Number(adapter.limits.maxBufferSize || 0),
+      maxStorageBufferBindingSize: Number(adapter.limits.maxStorageBufferBindingSize || 0),
+    } : null,
     sharedMemory,
     isolated,
     hardwareConcurrency: navigator.hardwareConcurrency || 1,
-    recommendedBackend: "cpu",
+    recommendedBackend: webgpuReady ? "webgpu" : "cpu",
     guidance,
+  };
+}
+
+async function probeWebGPU(adapter) {
+  let device;
+  try {
+    device = await adapter.requestDevice({ requiredFeatures: ["shader-f16"] });
+    device.pushErrorScope("validation");
+    const module = device.createShaderModule({
+      code: `enable f16;
+        @compute @workgroup_size(1)
+        fn main() { let value = f16(1.0); _ = value; }`,
+    });
+    await device.createComputePipelineAsync({
+      layout: "auto",
+      compute: { module, entryPoint: "main" },
+    });
+    const validationError = await device.popErrorScope();
+    if (validationError) throw validationError;
+    return { ready: true, error: "" };
+  } catch (error) {
+    return { ready: false, error: error?.message || String(error) };
+  } finally {
+    device?.destroy();
+  }
+}
+
+function readAdapterInfo(adapter) {
+  const info = adapter.info || {};
+  return {
+    architecture: info.architecture || "",
+    device: info.device || "",
+    description: info.description || "",
+    vendor: info.vendor || "",
   };
 }
 

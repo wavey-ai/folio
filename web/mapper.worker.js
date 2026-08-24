@@ -1,4 +1,8 @@
-import initJson2Leaf, { mapJson, mapXml } from "./pkg/json2leaf.js?v=20260823-5";
+import initJson2Leaf, {
+  mapJsonCompact,
+  mapXmlCompact,
+} from "./pkg/json2leaf.js?v=20260823-6";
+import { RUNTIME_ASSETS } from "./runtime-assets.js?v=20260823-2";
 
 const wasmReady = initializeWasm();
 
@@ -12,12 +16,14 @@ self.addEventListener("message", async ({ data }) => {
     }
 
     if (operation !== "map") throw new Error(`Unknown mapper operation: ${operation}`);
-    const input = new TextDecoder().decode(data.buffer);
+    const input = new Uint8Array(data.buffer);
     const output = data.format === "xml"
-      ? mapXml(data.source, input)
-      : mapJson(data.source, input);
-    const encoded = new TextEncoder().encode(output);
-    self.postMessage({ id, result: encoded.buffer }, [encoded.buffer]);
+      ? mapXmlCompact(data.source, input)
+      : mapJsonCompact(data.source, input);
+    const buffer = output.byteOffset === 0 && output.byteLength === output.buffer.byteLength
+      ? output.buffer
+      : output.buffer.slice(output.byteOffset, output.byteOffset + output.byteLength);
+    self.postMessage({ id, result: buffer }, [buffer]);
   } catch (error) {
     self.postMessage({ id, error: error.message });
   }
@@ -31,6 +37,6 @@ async function initializeWasm() {
     return;
   }
   await initJson2Leaf({
-    module_or_path: new URL("./pkg/json2leaf_bg.wasm?v=20260823-5", import.meta.url),
+    module_or_path: RUNTIME_ASSETS.json2leafWasm,
   });
 }
