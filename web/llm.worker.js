@@ -9,7 +9,7 @@ import {
   schemaChatSqlDraft,
   validateProposal,
   validateReadQuery,
-} from "./assistant-context.js?v=20260824-52";
+} from "./assistant-context.js?v=20260918-1";
 
 const REPORT_RESPONSE_FORMAT = {
   type: "json_schema",

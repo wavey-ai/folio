@@ -35,9 +35,11 @@ test("system prompt explains records and structural joins", () => {
   assert.match(prompt, /physical identifier columns are id and parent_id/);
   assert.match(prompt, /Filter aggregate results with HAVING/);
   assert.match(prompt, /B-tree indexes on \(name, id\), \(parent_id\), and \(name, path\)/);
-  assert.match(prompt, /WITH RECURSIVE when the question requires/);
+  assert.match(prompt, /Start CTE queries with WITH RECURSIVE/);
+  assert.match(prompt, /WHERE name = '_tree'/);
   assert.match(prompt, /report__customers/);
-  assert.match(prompt, /child_record\.parent_id = parent_record\.id/);
+  assert.match(prompt, /JOIN descendants ON descendants\.ancestor_id = parent_record\.id/);
+  assert.match(prompt, /JOIN child_record ON child_record\.id = descendants\.id/);
 });
 
 test("external model prompt includes the question and schema", () => {
@@ -57,11 +59,17 @@ test("schema chat prompt supports explanations and report planning", () => {
   assert.match(prompt, /Treat every user message as report requirements/);
   assert.match(prompt, /PostgreSQL supplies all result rows and totals after execution/);
   assert.match(prompt, /parent_id connects a nested record/);
-  assert.match(prompt, /ordinary joins for known parent-child hops/);
+  assert.match(prompt, /Start CTE queries with WITH RECURSIVE/);
   assert.match(prompt, /report__customers/);
   assert.match(prompt, /complete query in sql/);
   assert.doesNotMatch(prompt, /Your short answer/);
   assert.doesNotMatch(prompt, /specific answer/);
+});
+
+test("single-record prompt uses WITH RECURSIVE without unnecessary traversal", () => {
+  const prompt = buildSystemPrompt({ tables: context.tables.slice(0, 1), relationships: [] });
+  assert.match(prompt, /WITH RECURSIVE item AS/);
+  assert.doesNotMatch(prompt, /UNION ALL/);
 });
 
 test("schema chat extracts a grammar-constrained JSON query", () => {

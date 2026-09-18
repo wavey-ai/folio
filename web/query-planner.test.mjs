@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 
 import { buildCatalog, buildSql, preview } from "./query-planner.js";
+import { expectedArtistOverview, recursiveQueryLeaves } from "../tests/query-fixtures.mjs";
 
 const leaves = [
   { id: "root", parent_id: null, name: "_tree", path: "", value: "report", data_type: "tree" },
@@ -28,6 +29,7 @@ test("query plan creates typed aggregate SQL", () => {
   }, catalog);
 
   assert.match(sql, /max\(value::numeric\)/);
+  assert.match(sql, /^WITH RECURSIVE records AS/);
   assert.match(sql, /sum\("amount"\) AS total/);
   assert.match(sql, /WHERE "amount" > 100/);
 });
@@ -57,13 +59,22 @@ test("text search works with each inferred field type", () => {
   assert.match(sql, /"amount"::text ILIKE '%25%'/);
 });
 
-test("Discogs report joins nested music records through parent ids", () => {
+test("Discogs report recursively follows nested music records through parent ids", () => {
   const sql = buildSql({ operation: "discogs-artist-overview" }, []);
 
-  assert.match(sql, /SELECT parent_id, max\(value\) FILTER \(WHERE path = 'name'\)/);
+  assert.match(sql, /^WITH RECURSIVE/);
+  assert.match(sql, /FROM release_tree\n    JOIN nodes AS child/);
+  assert.match(sql, /child\.name = '_tree'/);
+  assert.match(sql, /SELECT release_row_id, max\(value\) FILTER \(WHERE path = 'name'\)/);
   assert.match(sql, /genre\.genre = 'Electronic'/);
   assert.match(sql, /string_agg\(DISTINCT release_label\.label/);
   assert.match(sql, /count\(DISTINCT electronic_release\.release_row_id\)/);
+});
+
+test("Discogs preview follows multiple levels without multiplying scalar rows", () => {
+  const fixture = recursiveQueryLeaves();
+  const result = preview({ operation: "discogs-artist-overview" }, fixture, buildCatalog(fixture));
+  assert.deepEqual(result.rows, expectedArtistOverview);
 });
 
 test("Discogs preview combines releases, artists, labels, styles, and tracks", () => {
@@ -108,6 +119,7 @@ test("Discogs preview combines releases, artists, labels, styles, and tracks", (
       value: "First Track",
       data_type: "string",
     },
+    musicLeaf("release-2", "root", "", "title", "Second release"),
     musicLeaf("artist-2", "release-2", "artists__artist", "name", "Wavey Artist"),
     musicLeaf("genre-2", "release-2", "genres__genre", "value", "Electronic"),
     musicLeaf("label-2", "release-2", "labels__label", "@name", "Moon Records"),

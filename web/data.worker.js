@@ -1,4 +1,4 @@
-import { buildCatalog, buildSql, preview } from "./query-planner.js";
+import { buildCatalog, buildSql, preview } from "./query-planner.js?v=20260918-1";
 
 let leaves = null;
 let catalog = [];

@@ -42,7 +42,7 @@ await Promise.all([
 ]);
 
 const fixturePaths = await writeFixtures(fixtures);
-const webFixturePaths = await downloadWebFixtures(fixtures, report.webSources);
+const webFixturePaths = options.onlyCsv ? {} : await downloadWebFixtures(fixtures, report.webSources);
 let server = null;
 let browser = null;
 let page = null;
@@ -81,6 +81,27 @@ try {
     await waitForApplication(page);
     assert.equal(await page.$eval("#saved-work-count", (element) => element.textContent), "0");
     await page.screenshot({ path: join(screenshots, "01-empty-desktop.png"), fullPage: true });
+  });
+
+  await runStep("import CSV, query it, and restore it after a reload", async () => {
+    assert.match(await page.$eval("#file-input", (input) => input.accept), /\.csv/);
+    await uploadDocument(page, fixturePaths.csv, "flat.csv");
+    await assertDocumentReady(page, "flat.csv");
+    assert.equal(await page.$eval("#table-count", (element) => element.textContent), "1");
+    await runSql(page, "SELECT count(DISTINCT id) FROM nodes WHERE name = 'flat';", "2");
+    const sql = "SELECT value FROM nodes WHERE name = 'flat' AND path = 'account' AND value = '00123';";
+    await runSql(page, sql, "00123");
+    await page.reload({ waitUntil: "domcontentloaded", timeout: 120_000 });
+    await waitForApplication(page);
+    await assertDocumentReady(page, "flat.csv");
+    assert.equal(await page.$eval("#sql-output", (element) => element.value), sql);
+    await runSql(page, sql, "00123");
+    await runSql(page, "SELECT value FROM nodes WHERE name = 'flat' AND path = 'note' AND value <> '';", 'Said "hello"\nagain');
+    await page.screenshot({ path: join(screenshots, "csv-desktop.png"), fullPage: true });
+    await page.setViewport({ width: 390, height: 844, deviceScaleFactor: 1 });
+    assert.equal(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth), true);
+    await page.screenshot({ path: join(screenshots, "csv-mobile.png"), fullPage: true });
+    await page.setViewport({ width: 1440, height: 1100, deviceScaleFactor: 1 });
   });
 
   await runStep("map complex JSON and query it", async () => {
@@ -407,6 +428,7 @@ try {
 }
 
 async function runStep(name, action) {
+  if (options.onlyCsv && name !== "open Folio" && name !== "check browser diagnostics" && !name.startsWith("import CSV")) return;
   const started = performance.now();
   process.stdout.write(`→ ${name}\n`);
   try {
@@ -442,6 +464,7 @@ function parseOptions(argumentsList) {
       && process.env.FOLIO_ASSISTANT !== "0",
     assistantQuestions: argumentsList.includes("--assistant-once") ? 1 : 2,
     headed: argumentsList.includes("--headed") || process.env.FOLIO_HEADED === "1",
+    onlyCsv: argumentsList.includes("--only-csv"),
   };
 }
 
@@ -451,6 +474,7 @@ async function startLocalServerWhenNeeded(url) {
   if (await responds(url)) return null;
   const child = spawn(process.execPath, ["scripts/serve-web.mjs"], {
     cwd: root,
+    env: { ...process.env, FOLIO_PORT: target.port || "8000" },
     stdio: ["ignore", "pipe", "pipe"],
   });
   child.stdout.on("data", (chunk) => process.stdout.write(chunk));
@@ -688,11 +712,13 @@ async function writeFixtures(directory) {
     ],
   };
   const paths = {
+    csv: join(directory, "flat.csv"),
     json: join(directory, "complex.json"),
     xml: join(directory, "complex.xml"),
     replacement: join(directory, "replacement.json"),
   };
   await Promise.all([
+    writeFile(paths.csv, '\uFEFFname,account,note\r\n"Jam, Cafe",00123,"Said ""hello""\nagain"\r\nLeaf Shop,9007199254740993,\r\n'),
     writeFile(paths.json, `${JSON.stringify(json, null, 2)}\n`),
     writeFile(paths.xml, `${xml}\n`),
     writeFile(paths.replacement, `${JSON.stringify(replacement, null, 2)}\n`),

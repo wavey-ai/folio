@@ -77,6 +77,46 @@ test("workers map, catalog, search, and query a document", async (context) => {
   assert.doesNotMatch(batch.sql, /ATG12\.\n\n/);
 });
 
+test("workers import CSV as one flat table and recover from malformed CSV", async (context) => {
+  const mapper = workerClient("./mapper.worker.js");
+  const data = workerClient("./data.worker.js");
+  context.after(async () => Promise.all([mapper.close(), data.close()]));
+
+  const invalid = new TextEncoder().encode("name,note\none").buffer;
+  await assert.rejects(
+    mapper.call("map", { source: "report", format: "csv", buffer: invalid }, [invalid]),
+    /CSV row 2 has 1 cells; expected 2/,
+  );
+
+  const source = new TextEncoder().encode(
+    '\uFEFFname,account,amount,note,empty\r\n"Jam, Cafe",00123,12.50,"Said ""hello""\r\nagain",\r\nLeaf Shop,9007199254740993,0,,\r\n',
+  ).buffer;
+  const mapped = await mapper.call("map", { source: "report", format: "csv", buffer: source }, [source]);
+  const prepared = await data.call("load", { buffer: mapped }, [mapped]);
+  assert.equal(prepared.catalog.length, 1);
+  assert.equal(prepared.valueCount, 10);
+  const [table] = prepared.catalog;
+  assert.equal(table.name, "report");
+  assert.equal(table.rowCount, 2);
+  assert.ok(table.fields.every((field) => field.type === "string"));
+
+  const plan = {
+    table: table.name,
+    operation: "rows",
+    fields: ["name", "account", "amount", "note", "empty"],
+    filter: { field: "", operator: "equals", value: "" },
+  };
+  const result = await data.call("preview", { plan });
+  assert.deepEqual(result.rows, [
+    { name: "Jam, Cafe", account: "00123", amount: "12.50", note: 'Said "hello"\r\nagain', empty: "" },
+    { name: "Leaf Shop", account: "9007199254740993", amount: "0", note: "", empty: "" },
+  ]);
+  assert.match(await data.call("sql", { plan }), /WHERE name = 'report'/);
+  const batch = await data.call("postgresBatch", { offset: 0, limit: 100 });
+  assert.match(batch.sql, /00123/);
+  assert.match(batch.sql, /9007199254740993/);
+});
+
 function workerClient(modulePath) {
   const worker = new Worker(harness, {
     type: "module",

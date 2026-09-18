@@ -106,7 +106,7 @@ function recordCte(table, fields) {
     return `        max(${value}) FILTER (WHERE path = ${literal(field.name)}) AS ${identifier(field.name)}`;
   });
   const separator = projections.length ? ",\n" : "\n";
-  return `WITH records AS (\n    SELECT\n        id,\n        parent_id${separator}${projections.join(",\n")}\n    FROM nodes\n    WHERE name = ${literal(table.name)}\n    GROUP BY id, parent_id\n)`;
+  return `WITH RECURSIVE records AS (\n    SELECT\n        id,\n        parent_id${separator}${projections.join(",\n")}\n    FROM nodes\n    WHERE name = ${literal(table.name)}\n    GROUP BY id, parent_id\n)`;
 }
 
 function filterSql(filter, table) {
@@ -143,7 +143,7 @@ ORDER BY depth, table_name;`;
 }
 
 function discogsArtistOverviewSql() {
-  return `WITH release AS (
+  return `WITH RECURSIVE release AS (
     SELECT
         id,
         max(value) FILTER (WHERE path = 'artists__artist__name') AS artist_name,
@@ -155,58 +155,78 @@ function discogsArtistOverviewSql() {
     WHERE name = '${discogsReleaseTable}'
     GROUP BY id
 ),
+release_tree AS (
+    SELECT id AS release_row_id, id
+    FROM release
+    UNION ALL
+    SELECT release_tree.release_row_id, child.id
+    FROM release_tree
+    JOIN nodes AS child
+      ON child.parent_id = release_tree.id
+     AND child.name = '_tree'
+),
+release_nodes AS (
+    SELECT release_tree.release_row_id, nodes.id, nodes.name, nodes.path, nodes.value
+    FROM release_tree
+    JOIN nodes ON nodes.id = release_tree.id
+    WHERE nodes.name IN (
+        '${discogsArtistTable}', '${discogsLabelTable}',
+        '${discogsGenreTable}', '${discogsStyleTable}', '${discogsTrackTable}'
+    )
+),
 release_artist AS (
     SELECT id AS release_row_id, artist_name AS artist
     FROM release
     WHERE artist_name IS NOT NULL
-    UNION
-    SELECT parent_id, max(value) FILTER (WHERE path = 'name')
-    FROM nodes
+    UNION ALL
+    SELECT release_row_id, max(value) FILTER (WHERE path = 'name')
+    FROM release_nodes
     WHERE name = '${discogsArtistTable}'
-    GROUP BY id, parent_id
+    GROUP BY release_row_id, id
 ),
 release_label AS (
     SELECT id AS release_row_id, label_name AS label
     FROM release
     WHERE label_name IS NOT NULL
-    UNION
-    SELECT parent_id, max(value) FILTER (WHERE path = '@name')
-    FROM nodes
+    UNION ALL
+    SELECT release_row_id, max(value) FILTER (WHERE path = '@name')
+    FROM release_nodes
     WHERE name = '${discogsLabelTable}'
-    GROUP BY id, parent_id
+    GROUP BY release_row_id, id
 ),
 release_genre AS (
     SELECT id AS release_row_id, genre
     FROM release
     WHERE genre IS NOT NULL
-    UNION
-    SELECT parent_id, max(value) FILTER (WHERE path = 'value')
-    FROM nodes
+    UNION ALL
+    SELECT release_row_id, max(value) FILTER (WHERE path = 'value')
+    FROM release_nodes
     WHERE name = '${discogsGenreTable}'
-    GROUP BY id, parent_id
+    GROUP BY release_row_id, id
 ),
 release_style AS (
     SELECT id AS release_row_id, style
     FROM release
     WHERE style IS NOT NULL
-    UNION
-    SELECT parent_id, max(value) FILTER (WHERE path = 'value')
-    FROM nodes
+    UNION ALL
+    SELECT release_row_id, max(value) FILTER (WHERE path = 'value')
+    FROM release_nodes
     WHERE name = '${discogsStyleTable}'
-    GROUP BY id, parent_id
+    GROUP BY release_row_id, id
+),
+track_rows AS (
+    SELECT id AS release_row_id, 1::bigint AS tracks
+    FROM release
+    WHERE single_track_title IS NOT NULL
+    UNION ALL
+    SELECT release_row_id, count(DISTINCT id)::bigint
+    FROM release_nodes
+    WHERE name = '${discogsTrackTable}' AND path = 'title'
+    GROUP BY release_row_id
 ),
 track_count AS (
     SELECT release_row_id, sum(tracks)::bigint AS tracks
-    FROM (
-        SELECT id AS release_row_id, 1::bigint AS tracks
-        FROM release
-        WHERE single_track_title IS NOT NULL
-        UNION ALL
-        SELECT parent_id, count(DISTINCT id)::bigint
-        FROM nodes
-        WHERE name = '${discogsTrackTable}' AND path = 'title'
-        GROUP BY parent_id
-    ) AS counted_tracks
+    FROM track_rows
     GROUP BY release_row_id
 ),
 electronic_release AS (
@@ -273,6 +293,24 @@ function previewDiscogsArtistOverview(leaves) {
   const genres = new Map();
   const styles = new Map();
   const tracks = new Map();
+  const parents = new Map();
+  const releaseOwners = new Map();
+  for (const leaf of leaves) {
+    parents.set(leaf.id, leaf.parent_id);
+    if (leaf.name === discogsReleaseTable) releaseOwners.set(leaf.id, leaf.id);
+  }
+
+  function releaseFor(id) {
+    const visited = new Set();
+    let current = id;
+    while (current && !releaseOwners.has(current) && !visited.has(current)) {
+      visited.add(current);
+      current = parents.get(current);
+    }
+    const releaseId = releaseOwners.get(current);
+    for (const recordId of visited) releaseOwners.set(recordId, releaseId);
+    return releaseId;
+  }
 
   for (const leaf of leaves) {
     if (leaf.name === discogsReleaseTable) {
@@ -284,22 +322,24 @@ function previewDiscogsArtistOverview(leaves) {
       continue;
     }
 
+    if (leaf.name === "_tree") continue;
+    const releaseId = releaseFor(leaf.id);
     if (leaf.name === discogsArtistTable && leaf.path === "name") {
-      addDimension(artists, leaf.parent_id, leaf.value);
+      addDimension(artists, releaseId, leaf.value);
     } else if (leaf.name === discogsLabelTable && leaf.path === "@name") {
-      addDimension(labels, leaf.parent_id, leaf.value);
+      addDimension(labels, releaseId, leaf.value);
     } else if (leaf.name === discogsGenreTable && leaf.path === "value") {
-      addDimension(genres, leaf.parent_id, leaf.value);
+      addDimension(genres, releaseId, leaf.value);
     } else if (leaf.name === discogsStyleTable && leaf.path === "value") {
-      addDimension(styles, leaf.parent_id, leaf.value);
+      addDimension(styles, releaseId, leaf.value);
     } else if (leaf.name === discogsTrackTable && leaf.path === "title") {
-      addDimension(tracks, leaf.parent_id, leaf.id);
+      addDimension(tracks, releaseId, leaf.id);
     }
   }
 
   const totals = new Map();
   for (const [releaseId, releaseGenres] of genres) {
-    if (![...releaseGenres].some((genre) => genre.toLowerCase() === "electronic")) continue;
+    if (!releaseGenres.has("Electronic")) continue;
     for (const artist of artists.get(releaseId) || []) {
       if (!totals.has(artist)) {
         totals.set(artist, {

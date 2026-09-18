@@ -20,7 +20,8 @@ Each CTE exposes only the columns in its SELECT list. Trace every later column r
 Filter aggregate results with HAVING or with an outer SELECT.
 
 Join contained records with child.parent_id = parent.id. XML attributes start with @. Element text uses $text. Resolve RDF #references with ltrim(reference, '#').
-Use ordinary joins when the relationship depth is known. Use WITH RECURSIVE when the question requires ancestors or descendants at an unknown depth.
+Start CTE queries with WITH RECURSIVE. Use a recursive CTE for ancestors or descendants at an unknown depth; ordinary joins can combine known records.
+Traverse nodes WHERE name = '_tree', where value holds the inferred table name. Join scalar fields by id after traversal to avoid duplicate paths.
 Match literal filters to supplied field examples. Prefer an exact example match over a similar table or field name.
 
 The context relationships are verified from this document. Use containment edges for nesting and reference edges for linked records.
@@ -49,7 +50,8 @@ nodes(id TEXT, parent_id TEXT, name TEXT, path TEXT, data_type TEXT, value TEXT)
 PostgreSQL has B-tree indexes on (name, id), (parent_id), and (name, path).
 
 Rows with the same name and id form one inferred record. parent_id connects a nested record to its container. XML attributes start with @. Element text uses $text.
-Use ordinary joins for known parent-child hops. Use WITH RECURSIVE only for traversal at an unknown depth.
+Start CTE queries with WITH RECURSIVE. Use a recursive CTE for ancestors or descendants at an unknown depth; ordinary joins can combine known records.
+Traverse nodes WHERE name = '_tree', where value holds the inferred table name. Join scalar fields by id after traversal to avoid duplicate paths.
 Match requested literal values to the supplied field examples.
 
 Use the supplied schema names and paths accurately.
@@ -255,7 +257,7 @@ function buildRecordPattern(context) {
   const fieldName = sqlPromptLiteral(
     String(fieldSpec || "displayName").replace(/:(?:string|number|boolean)(?:=.*)?$/i, ""),
   );
-  return `WITH item AS (
+  return `WITH RECURSIVE item AS (
   SELECT id, parent_id, max(value) FILTER (WHERE path = '${fieldName}') AS field_value
   FROM nodes WHERE name = '${tableName}' GROUP BY id, parent_id
 )
@@ -270,15 +272,25 @@ function buildQueryPattern(context) {
   if (!parent || !child) return buildRecordPattern(context);
   const parentPath = sqlPromptLiteral(promptFieldPath(parent.fields?.[0], "parent_field"));
   const childPath = sqlPromptLiteral(promptFieldPath(child.fields?.[0], "child_field"));
-  return `WITH parent_record AS (
+  return `WITH RECURSIVE parent_record AS (
   SELECT id, max(value) FILTER (WHERE path = '${parentPath}') AS parent_value
   FROM nodes WHERE name = '${sqlPromptLiteral(parent.name)}' GROUP BY id
+), descendants AS (
+  SELECT id AS ancestor_id, id
+  FROM parent_record
+  UNION ALL
+  SELECT descendants.ancestor_id, child.id
+  FROM descendants
+  JOIN nodes AS child ON child.parent_id = descendants.id
+  WHERE child.name = '_tree'
 ), child_record AS (
   SELECT id, parent_id, max(value) FILTER (WHERE path = '${childPath}') AS child_value
   FROM nodes WHERE name = '${sqlPromptLiteral(child.name)}' GROUP BY id, parent_id
 )
 SELECT parent_record.parent_value, child_record.child_value
-FROM child_record JOIN parent_record ON child_record.parent_id = parent_record.id
+FROM parent_record
+JOIN descendants ON descendants.ancestor_id = parent_record.id
+JOIN child_record ON child_record.id = descendants.id AND child_record.id <> parent_record.id
 LIMIT 100;`;
 }
 
@@ -311,7 +323,8 @@ Each CTE exposes only the columns in its SELECT list. Trace every later column r
 Filter aggregate results with HAVING or with an outer SELECT.
 
 Join contained records with child.parent_id = parent.id. XML attributes start with @. Element text uses $text. Resolve RDF #references with ltrim(reference, '#').
-Use ordinary joins when the relationship depth is known. Use WITH RECURSIVE when the question requires ancestors or descendants at an unknown depth.
+Start CTE queries with WITH RECURSIVE. Use a recursive CTE for ancestors or descendants at an unknown depth; ordinary joins can combine known records.
+Traverse nodes WHERE name = '_tree', where value holds the inferred table name. Join scalar fields by id after traversal to avoid duplicate paths.
 Match literal filters to supplied field examples. Prefer an exact example match over a similar table or field name.
 
 The context relationships are verified from this document. Use containment edges for nesting and reference edges for linked records.

@@ -3,7 +3,7 @@ name = "json2leaf"
 version = "0.2.0"
 edition = "2024"
 description = "Map nested JSON and XML documents into relational leaf rows"
-repository = "https://github.com/wavey-ai/json2Leaf"
+repository = "https://github.com/wavey-ai/folio"
 keywords = ["json", "postgresql", "schema", "wasm", "xml"]
 categories = ["command-line-utilities", "data-structures", "wasm"]
 

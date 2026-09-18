@@ -3,6 +3,7 @@ import initJson2Leaf, {
   mapXmlCompact,
 } from "./pkg/json2leaf.js?v=20260823-6";
 import { RUNTIME_ASSETS } from "./runtime-assets.js?v=20260823-2";
+import { parseCsv } from "./csv.js?v=20260917-1";
 
 const wasmReady = initializeWasm();
 
@@ -16,7 +17,11 @@ self.addEventListener("message", async ({ data }) => {
     }
 
     if (operation !== "map") throw new Error(`Unknown mapper operation: ${operation}`);
-    const input = new Uint8Array(data.buffer);
+    let input = new Uint8Array(data.buffer);
+    if (data.format === "csv") {
+      const records = parseCsv(new TextDecoder().decode(input));
+      input = new TextEncoder().encode(JSON.stringify(records));
+    }
     const output = data.format === "xml"
       ? mapXmlCompact(data.source, input)
       : mapJsonCompact(data.source, input);

@@ -33,7 +33,7 @@ export async function readWorkspaceDocument() {
     if (!record?.blob) return null;
     return {
       source: record.source || "document",
-      format: record.format === "xml" ? "xml" : "json",
+      format: ["xml", "csv"].includes(record.format) ? record.format : "json",
       label: record.label || record.source || "document",
       blob: record.blob,
       savedAt: record.savedAt || "",

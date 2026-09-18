@@ -7,7 +7,7 @@
     <link rel="icon" href="./favicon.svg?v=20260823-2" type="image/svg+xml" />
     <meta
       name="description"
-      content="Turn JSON and XML documents into fully traversable schemas and PostgreSQL reports."
+      content="Turn JSON, XML, and CSV documents into fully traversable schemas and PostgreSQL reports."
     />
     <title>Folio</title>
     <link rel="stylesheet" href="./styles.css?v=20260824-62" />
@@ -33,8 +33,8 @@
     <main>
       <section class="hero" aria-label="Open a document">
         <div class="product-promise">
-          <p class="hero-kicker"><span>Local document intelligence</span> JSON + XML</p>
-          <h1>Turn structure into answers.<em>For JSON and XML.</em></h1>
+          <p class="hero-kicker"><span>Local document intelligence</span> JSON + XML + CSV</p>
+          <h1>Turn structure into answers.<em>For JSON, XML, and CSV.</em></h1>
           <p class="hero-summary">
             Import a document and build reports from every value.
           </p>
@@ -68,12 +68,12 @@
           </div>
           <label class="file-control" id="document-dropzone" for="file-input">
             <span class="upload-mark" aria-hidden="true">↗</span>
-            <strong>Drop JSON or XML here</strong>
+            <strong>Drop JSON, XML, or CSV here</strong>
             <small>or choose a document from this device</small>
             <input
               id="file-input"
               type="file"
-              accept="application/json,application/xml,text/xml,.json,.xml"
+              accept="application/json,application/xml,text/xml,text/csv,.json,.xml,.csv"
             />
           </label>
           <div class="sample-actions">
@@ -94,7 +94,7 @@
               <p class="panel-kicker">Workspace activity</p>
               <div class="activity-current-message">
                 <h2 id="activity-title">Ready for a document</h2>
-                <p id="activity-detail">Drop JSON or XML above, or load the demo dataset.</p>
+                <p id="activity-detail">Drop JSON, XML, or CSV above, or load the demo dataset.</p>
               </div>
             </div>
             <div class="activity-current-actions">
@@ -111,7 +111,7 @@
           <section class="service-card document-service ready" id="document-service">
             <div class="service-heading">
               <span class="service-icon document-icon" aria-hidden="true"></span>
-              <div><strong>Document</strong><span id="document-status" role="status">Choose JSON, XML, or the demo dataset</span></div>
+              <div><strong>Document</strong><span id="document-status" role="status">Choose JSON, XML, CSV, or the demo dataset</span></div>
               <em id="document-service-state">Ready</em>
             </div>
             <ol class="prep-stages" id="prep-stages" aria-label="Document preparation">
@@ -277,7 +277,7 @@
                 <span>Fields</span><code>List paths and types</code><i aria-hidden="true">→</i>
               </button>
               <button type="button" data-schema-query="relationships" disabled>
-                <span>Relationships</span><code>Follow parent_id links</code><i aria-hidden="true">→</i>
+                <span>Relationships</span><code>WITH RECURSIVE · ancestors + descendants</code><i aria-hidden="true">→</i>
               </button>
             </div>
           </section>
@@ -301,7 +301,7 @@
                       <option value="count">Count rows</option>
                       <option value="sum">Add a number field</option>
                       <option value="average">Average a number field</option>
-                      <option value="tree">Show the document tree</option>
+                      <option value="tree">Document tree · WITH RECURSIVE</option>
                     </select>
                   </label>
                 </div>
@@ -380,6 +380,7 @@
           <div class="schema-intro">
             <p>Every scalar value becomes one row in <code>nodes</code>. Rows with the same <code>name</code> and <code>id</code> form one inferred record.</p>
             <p>XML attributes use paths that start with <code>@</code>. Element text uses <code>$text</code>. Each row keeps the element hierarchy through <code>parent_id</code>.</p>
+            <p>Use <code>WITH RECURSIVE</code> to follow <code>parent_id</code> through every level. Traverse <code>_tree</code> rows, then join scalar values by <code>id</code>.</p>
             <h3>Every value keeps six coordinates</h3>
             <div class="schema-table-wrap">
               <table class="schema-columns">
@@ -391,15 +392,27 @@
           <div class="schema-examples">
             <h3>Query the universal schema</h3>
             <div class="schema-patterns">
-              <div><strong>Build complete records</strong><pre><code>SELECT id, parent_id,
+              <div><strong>Build complete records</strong><pre><code>WITH RECURSIVE records AS (
+  SELECT id, parent_id,
   max(value) FILTER (WHERE path = 'name') AS name
-FROM nodes
-WHERE name = 'document__items'
-GROUP BY id, parent_id;</code></pre></div>
-              <div><strong>Follow nested relationships</strong><pre><code>SELECT child.value, parent.value
-FROM nodes AS child
-JOIN nodes AS parent
-  ON child.parent_id = parent.id;</code></pre></div>
+  FROM nodes
+  WHERE name = 'document__items'
+  GROUP BY id, parent_id
+)
+SELECT * FROM records;</code></pre></div>
+              <div><strong>Follow every level with WITH RECURSIVE</strong><pre><code>WITH RECURSIVE tree AS (
+  SELECT id, parent_id, value AS table_name, 0 AS depth
+  FROM nodes
+  WHERE name = '_tree' AND parent_id IS NULL
+  UNION ALL
+  SELECT child.id, child.parent_id, child.value, tree.depth + 1
+  FROM tree
+  JOIN nodes AS child ON child.parent_id = tree.id
+  WHERE child.name = '_tree'
+)
+SELECT table_name, depth, id, parent_id
+FROM tree
+ORDER BY depth, table_name;</code></pre></div>
             </div>
           </div>
         </div>
@@ -408,9 +421,9 @@ JOIN nodes AS parent
 
     <footer class="site-footer">
       <div class="footer-identity"><strong>Folio</strong><span>Turn structure into answers.</span></div>
-      <a class="footer-github" href="https://github.com/wavey-ai/json2Leaf" target="_blank" rel="noreferrer">
+      <a class="footer-github" href="https://github.com/wavey-ai/folio" target="_blank" rel="noreferrer">
         <span>GitHub</span>
-        <strong>wavey-ai/json2Leaf</strong>
+        <strong>wavey-ai/folio</strong>
         <i aria-hidden="true">↗</i>
       </a>
       <nav aria-label="Project links">
@@ -439,6 +452,6 @@ JOIN nodes AS parent
     </template>
 
     <script type="module" src="./wavey-credit.js?v=20260823-1"></script>
-    <script type="module" src="./app.js?v=20260824-57"></script>
+    <script type="module" src="./app.js?v=20260918-1"></script>
   </body>
 </html>

@@ -5,7 +5,7 @@
   "version": "0.2.0",
   "repository": {
     "type": "git",
-    "url": "https://github.com/wavey-ai/json2Leaf"
+    "url": "https://github.com/wavey-ai/folio"
   },
   "files": [
     "json2leaf_bg.wasm",

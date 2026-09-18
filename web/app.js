@@ -2,8 +2,9 @@ import {
   buildExternalModelPrompt,
   validateProposal,
   validateReadQuery,
-} from "./assistant-context.js?v=20260824-52";
-import { createCsv, createReportFilename } from "./csv.js?v=20260823-49";
+} from "./assistant-context.js?v=20260918-1";
+import { SCHEMA_STARTER_QUERIES } from "./schema-queries.js?v=20260918-1";
+import { createCsv, createReportFilename } from "./csv.js?v=20260917-1";
 import { PgrustClient } from "./pgrust-client.js?v=20260823-15";
 import { RUNTIME_ASSETS } from "./runtime-assets.js?v=20260823-2";
 import {
@@ -15,45 +16,9 @@ import {
   clearWorkspaceDocument,
   readWorkspaceDocument,
   saveWorkspaceDocument,
-} from "./workspace-session.js?v=20260823-1";
+} from "./workspace-session.js?v=20260917-1";
 
 const WORKSPACE_EDITOR_KEY = "folio-workspace-editor-v1";
-
-const SCHEMA_STARTER_QUERIES = {
-  rows: `SELECT *
-FROM nodes
-LIMIT 10;`,
-  records: `SELECT name,
-       count(DISTINCT id) AS records,
-       count(*) AS values
-FROM nodes
-WHERE name <> '_tree'
-GROUP BY name
-ORDER BY records DESC, values DESC
-LIMIT 100;`,
-  fields: `SELECT name,
-       path,
-       data_type,
-       count(*) AS values
-FROM nodes
-WHERE name <> '_tree'
-GROUP BY name, path, data_type
-ORDER BY name, path
-LIMIT 100;`,
-  relationships: `WITH records AS (
-  SELECT DISTINCT id, parent_id, name
-  FROM nodes
-  WHERE name <> '_tree'
-)
-SELECT parent.name AS parent_type,
-       child.name AS child_type,
-       count(*) AS links
-FROM records AS child
-JOIN records AS parent ON child.parent_id = parent.id
-GROUP BY parent.name, child.name
-ORDER BY links DESC, parent_type, child_type
-LIMIT 100;`,
-};
 
 const elements = {
   engineState: document.querySelector("#engine-state"),
@@ -164,7 +129,7 @@ function WorkerClient(path, onEvent = () => {}) {
 }
 
 WorkerClient.prototype.startWorker = function startWorker() {
-  const worker = new Worker(`${this.path}?v=20260824-55`, { type: "module" });
+  const worker = new Worker(`${this.path}?v=20260918-1`, { type: "module" });
   this.worker = worker;
   worker.addEventListener("message", ({ data }) => {
     if (data.id === undefined || data.id === null) {
@@ -399,10 +364,9 @@ elements.copyAgentSql.addEventListener("click", async () => {
 });
 
 async function loadDocumentFile(file) {
-  const source = file.name.replace(/\.(json|xml)$/i, "") || "document";
-  const format = file.name.toLowerCase().endsWith(".xml") || file.type.includes("xml")
-    ? "xml"
-    : "json";
+  const source = file.name.replace(/\.(json|xml|csv)$/i, "") || "document";
+  const extension = file.name.toLowerCase().match(/\.(json|xml|csv)$/)?.[1];
+  const format = extension || (file.type.includes("csv") ? "csv" : file.type.includes("xml") ? "xml" : "json");
   setPreparation("read", `Reading ${file.name}…`);
   try {
     const opened = await openDocument(source, await file.arrayBuffer(), format, file.name);
@@ -433,7 +397,7 @@ if (!(await restoreRememberedWorkspace())) {
   setActivity({
     source: "Folio",
     title: "Ready for a document",
-    detail: "Drop JSON or XML above, or load the demo dataset.",
+    detail: "Drop JSON, XML, or CSV above, or load the demo dataset.",
     status: "ready",
     progress: 0,
   });
@@ -596,7 +560,7 @@ function configureDemoReport(available) {
   elements.operationSelect.querySelector('[value="discogs-artist-overview"]')?.remove();
   if (!available) return "rows";
   elements.operationSelect.add(new Option(
-    "Electronic artists across releases",
+    "Electronic artists · recursive report",
     "discogs-artist-overview",
   ));
   return "discogs-artist-overview";
@@ -672,12 +636,12 @@ function showPreparationError(error) {
   elements.chatButton.disabled = state.assistantBusy || !state.catalog.length;
   elements.askButton.disabled = state.assistantBusy || !state.catalog.length;
   elements.ownModelButton.disabled = !state.catalog.length;
-  elements.documentStatus.textContent = `Review this document's JSON or XML syntax. ${error.message}`;
+  elements.documentStatus.textContent = `Review this document's format. ${error.message}`;
   setServiceState(elements.documentService, elements.documentServiceState, "error");
   setActivity({
     source: "Document",
     title: "Document needs attention",
-    detail: `Review its JSON or XML syntax. ${error.message}`,
+    detail: `Review its format. ${error.message}`,
     status: "error",
     details: { message: error.message },
   });
@@ -897,7 +861,7 @@ async function restoreRememberedWorkspace({ resumed = false } = {}) {
     appendActivity({
       source: "Workspace",
       title: "Ready for a document",
-      detail: "Open JSON or XML to start a new workspace.",
+      detail: "Open JSON, XML, or CSV to start a new workspace.",
       status: "info",
       details: { message: error.message },
     });
@@ -930,7 +894,7 @@ async function restoreRememberedWorkspace({ resumed = false } = {}) {
     appendActivity({
       source: "Workspace",
       title: "Ready for a document",
-      detail: "Open JSON or XML to start a new workspace.",
+      detail: "Open JSON, XML, or CSV to start a new workspace.",
       status: "error",
       details: { message: error.message },
     });
@@ -1256,7 +1220,7 @@ function currentReportQuestion() {
 
 function defaultSavedWorkTitle(kind, question, documentLabel) {
   if (question) return question.replace(/\s+/g, " ").slice(0, 80);
-  const source = String(documentLabel || "Document").replace(/\.(json|xml)$/i, "");
+  const source = String(documentLabel || "Document").replace(/\.(json|xml|csv)$/i, "");
   return `${source} ${kind}`.slice(0, 80);
 }
 
@@ -1332,13 +1296,14 @@ function selectTable(name) {
 function renderPlanner() {
   const table = state.catalog.find((item) => item.name === state.plan.table);
   const relationshipReport = state.plan.operation === "discogs-artist-overview";
+  const treeReport = state.plan.operation === "tree";
   elements.operationSelect.value = state.plan.operation;
-  elements.queryPrompt.hidden = !relationshipReport;
+  elements.queryPrompt.hidden = !relationshipReport && !treeReport;
   elements.queryPrompt.textContent = relationshipReport
-    ? "Which Electronic artists span the most releases, tracks, labels, and styles?"
-    : "";
-  elements.fieldPicker.hidden = relationshipReport;
-  elements.filterBlock.hidden = relationshipReport;
+    ? "WITH RECURSIVE follows each release’s nested records to compare Electronic artists, tracks, labels, and styles."
+    : treeReport ? "WITH RECURSIVE follows parent_id from each root through every level of the document tree." : "";
+  elements.fieldPicker.hidden = relationshipReport || treeReport;
+  elements.filterBlock.hidden = relationshipReport || treeReport;
   elements.fieldOptions.replaceChildren();
   elements.filterField.replaceChildren(new Option("Choose a field", ""));
 
@@ -2350,7 +2315,7 @@ async function knownReportProposal(question, context) {
   });
   return {
     sql,
-    answer: "This report compares Electronic artists across releases, tracks, labels, and styles.",
+    answer: "This report uses WITH RECURSIVE to follow nested records and compare Electronic artists across releases, tracks, labels, and styles.",
     tables: [
       "discogs_releases__release",
       "discogs_releases__release__artists__artist",
