@@ -1,54 +1,160 @@
-# json2Leaf
+# Folio
 
-json2Leaf maps nested JSON and XML documents to leaf rows with explicit tree links.
+**Turn JSON, XML, and CSV into SQL reports in your browser.**
 
-Use the rows for PostgreSQL analysis, schema diagrams, or a custom data pipeline.
-Stable document-based identifiers make repeated output easy to compare.
+Explore relationships, ask questions, and export results—all locally.
 
-## History
+Folio infers the structure, generates editable PostgreSQL, and runs your queries locally.
+Use visual controls, write SQL, or ask the local assistant to write it for you.
 
-Jamie Brough first wrote json2Leaf in Go in 2019.
-The implementation came from his original idea for making nested documents relational and easy to query.
+[Open Folio](https://folio.wavey.ai) · [Example report](#example-report) · [Local development](#local-development)
 
-The current Rust implementation keeps this model and adds XML, WebAssembly, stable identifiers, and PostgreSQL output.
+## Document analysis
+
+An API response can contain customers, orders, and line items at different depths.
+An XML catalog can contain releases, artists, labels, and tracks.
+Folio makes these nested records queryable while retaining their parent relationships.
+
+You can inspect an unfamiliar export, compare records, calculate totals, and produce a CSV report in one workspace.
+The generated SQL remains visible and editable throughout.
+
+- **Automatic structure.** Open JSON, XML, or CSV and browse the inferred tables, fields, and record counts.
+- **Relationships at every depth.** Use `WITH RECURSIVE` to follow ancestors and descendants through the document hierarchy.
+- **Three query methods.** Build a report visually, edit PostgreSQL directly, or ask a question in natural language.
+- **Local query execution.** Document mapping, SQL execution, and the optional assistant run in your browser.
+- **Reusable work.** Save queries and report results on this device, copy SQL, and download results as CSV.
+- **Searchable schema.** Find tables and fields through the schema search, including approximate name matches.
+
+## First report
+
+1. Open [folio.wavey.ai](https://folio.wavey.ai).
+2. Drop a JSON, XML, or CSV file into the workspace, or load the demo dataset.
+3. Explore the inferred tables and their fields.
+4. Choose a report, write SQL, or ask Folio a question.
+5. Run the query and inspect the result.
+6. Save your query or download the report as CSV.
+
+The visual builder and SQL editor work independently of the assistant.
+You can begin querying while the optional model downloads.
+
+## Example report
+
+The included 30 MB Discogs XML sample contains releases, artists, labels, genres, styles, tracks, credits, and identifiers.
+Its initial report answers:
+
+> Which Electronic artists have at least three releases, and how many tracks and labels do those releases cover?
+
+The report shows release counts, track counts, distinct labels, and styles for the top 25 artists.
+It uses `WITH RECURSIVE` to follow each release's nested records through `parent_id`.
+The query combines those records with fields stored directly on each release.
+
+Load the demo to inspect the SQL, run the report, and change the question.
+
+## Local analysis and AI
+
+Folio processes imported documents on your device.
+The Rust mapper runs through WebAssembly, and pgrust runs PostgreSQL queries in the browser.
+Dedicated workers prepare records, search the schema, and execute queries.
+
+The optional Qwen assistant also runs locally.
+It uses the document schema to generate SQL; the SQL engine calculates the report rows and totals.
+Local model downloads and response times depend on your device and browser.
+
+The **Use your model** option prepares a prompt for another assistant.
+That prompt includes schema details and selected example values.
+You choose whether to copy it into an external service, then paste the returned SQL into Folio.
+
+Saved queries, reports, and the current document use browser storage.
+Download reports you need to retain independently of that browser.
 
 ## Document model
 
-json2Leaf maps scalar values to leaf rows and records the document hierarchy in `_tree` rows.
-Each row has a stable `id` and an optional `parent_id`.
-These links support recursive PostgreSQL queries across records at any depth.
+Folio uses json2Leaf, the Rust mapper included in this repository.
+The mapper stores scalar values and structural links in one PostgreSQL table:
+
+```sql
+nodes(id, parent_id, name, path, data_type, value)
+```
+
+Rows with the same `name` and `id` form an inferred record.
+The `parent_id` identifies its containing record.
+Structural rows use `name = '_tree'`; their `value` contains the inferred table name.
+Stable document-based identifiers make repeated mappings easy to compare.
 
 The same model accepts JSON values, XML elements, XML attributes, and XML text.
-Folio also infers record groups from physical nesting and presents them as queryable tables.
+XML attribute paths start with `@`, and element text uses `$text`.
+Folio converts CSV rows into flat JSON objects before mapping them.
 
-## Related work
+### Recursive SQL
 
-[SQLite `json_tree()`](https://www.sqlite.org/json1.html#jtree) is the closest established model.
-SQLite added it in version 3.9.0 in 2015.
-It produces query-time rows with an element identifier, parent identifier, value, type, and path.
+This query follows the document from its roots through every mapped level:
 
-[DuckDB `json_tree()`](https://duckdb.org/docs/stable/data/json/json_functions) provides a similar recursive view of JSON.
-[Snowflake `FLATTEN`](https://docs.snowflake.com/en/sql-reference/functions/flatten) converts compound values into relational rows.
-[jsonschema2db](https://github.com/better/jsonschema2db) creates typed PostgreSQL tables from a supplied JSON Schema.
-[json-flattener](https://github.com/cmungall/json-flattener) creates denormalized tables for data frames and spreadsheets.
-[undatum](https://github.com/datenoio/undatum) converts, inspects, and queries many document formats, including JSON and XML.
+```sql
+WITH RECURSIVE tree AS (
+    SELECT id, parent_id, value AS table_name, 0 AS depth
+    FROM nodes
+    WHERE name = '_tree' AND parent_id IS NULL
+    UNION ALL
+    SELECT child.id, child.parent_id, child.value, tree.depth + 1
+    FROM tree
+    JOIN nodes AS child ON child.parent_id = tree.id
+    WHERE child.name = '_tree'
+)
+SELECT table_name, depth, id, parent_id
+FROM tree
+ORDER BY depth, table_name;
+```
 
-json2Leaf combines several parts of this field in one library:
+Traverse `_tree` rows first, then join scalar fields by `id`.
+This keeps multiple fields on one record from multiplying traversal paths.
+The Relationships starter reports ancestor and descendant types at each depth.
+The examples below the web editor explain and demonstrate `WITH RECURSIVE`.
 
-- It materializes document rows in ordinary PostgreSQL tables.
-- It gives repeated mappings stable document-based identifiers.
-- It uses one relational model for JSON and XML.
-- It exposes XML attributes and text as queryable values.
-- It retains parent links across inferred record groups.
-- It runs as a Rust library, command-line tool, or WebAssembly module.
+### Indexes
 
-In technical terms, json2Leaf is a cross-format, materialized `json_tree` with stable relationships and inferred record groups.
+The browser database uses three PostgreSQL B-tree indexes:
 
-## Command-line use
+- `(name, id)` for records within an inferred table.
+- `(parent_id)` for child lookups.
+- `(name, path)` for fields within an inferred table.
 
-Install Rust 1.85 or a later version.
+PostgreSQL chooses an execution plan for each query.
 
-Generate a PostgreSQL import script:
+### CSV input
+
+The first row contains unique, nonempty column names.
+Each data row must contain one cell for each column.
+Cell values remain strings to preserve leading zeros and large identifiers.
+
+CSV import supports quoted commas, escaped quotes, multiline cells, and UTF-8 files with a byte order mark.
+Folio ignores empty lines outside quoted cells.
+
+## Local development
+
+Install Rust 1.85 or later, Node.js, and `wasm-pack`.
+Build the browser bindings from the repository root:
+
+```sh
+wasm-pack build --target web --out-dir web/pkg \
+  --no-default-features --features wasm
+```
+
+Start the local server:
+
+```sh
+node scripts/serve-web.mjs
+```
+
+Open `http://localhost:8000/web/`.
+The server supplies the cross-origin isolation headers required by the browser runtimes.
+Runtime locations are defined in [`web/runtime-assets.js`](web/runtime-assets.js).
+
+## Command-line tool
+
+The `json2leaf` command reads JSON and XML files.
+Use it to generate PostgreSQL imports, mapped rows, or Graphviz schema diagrams outside the browser.
+
+Generate and load a PostgreSQL import script:
 
 ```sh
 cargo run -- ./my/reporting/dir
@@ -70,9 +176,11 @@ cargo run -- report.json --format json
 ```
 
 Use `--config config.json` to set table names, substitutions, and column overrides.
-Use [`config.example.json`](config.example.json) as a configuration model.
+See [`config.example.json`](config.example.json) for the configuration format.
 
 ## Library use
+
+The repository is named Folio; the Rust crate and command remain `json2leaf`.
 
 ```rust
 use json2leaf::{Config, Mapper};
@@ -102,41 +210,21 @@ wasm-pack build --target web --no-default-features --features wasm
 The bindings export `mapJson`, `mapXml`, `jsonToSql`, `jsonToInsertSql`, `jsonToDot`, and `TrigramIndex`.
 Each mapping function accepts a source name, a document string, and an optional configuration string.
 
-## Folio
+## Tests
 
-Folio is the browser studio for json2Leaf.
-It turns each document into a traversable schema for reporting.
-
-Build the browser bindings:
+Run the web unit and integration tests:
 
 ```sh
-wasm-pack build --target web --out-dir web/pkg \
-  --no-default-features --features wasm
+npm --prefix web test
 ```
 
-Start the local web server from the repository root:
+The integration tests execute queries in the bundled pgrust Wasm engine.
+They cover schema starters, recursive relationships, aggregates, assistant query patterns, and the examples in the web page.
+They also map the complete Discogs XML demo and compare its SQL report with the local preview.
+These tests require the local Wasm files, PostgreSQL VFS assets, and Discogs sample under `web/`.
 
-```sh
-node scripts/serve-web.mjs
-```
-
-Open `http://localhost:8000/web/`.
-Folio maps JSON and XML documents in the browser.
-It infers tables and creates PostgreSQL for visual query plans.
-The local preview lets you check each plan before you use its SQL.
-Dedicated workers map documents, prepare table data, and search elements.
-The trigram worker builds its postings when the first search starts.
-It reuses the postings for each later search.
-Use the 30 MB Discogs sample to explore releases, artists, labels, genres, styles, tracks, credits, and identifiers.
-The initial report joins each release to its nested music records through `parent_id`.
-It groups Electronic releases by artist and reports their tracks, labels, and styles.
-
-## pgrust Wasm test
-
-Build the pgrust Wasm module and its VFS assets.
-Place the pgrust checkout next to this repository.
-
-Run the integration test:
+For the command-line PostgreSQL integration test, place the pgrust checkout beside this repository and build its Wasm and VFS assets.
+Then run:
 
 ```sh
 tests/pgrust-wasm.sh
@@ -145,7 +233,7 @@ tests/pgrust-wasm.sh
 The test loads generated SQL into pgrust Wasm.
 It checks recursive traversal, typed values, aggregation, root values, and relationship joins.
 
-## Folio deployment
+## Deployment
 
 Folio runs at `https://folio.wavey.ai` on the `folio-studio` Cloudflare Worker.
 Large runtime files are public at `https://assets.folio.wavey.ai` in the `folio-public-assets` R2 bucket.
@@ -169,8 +257,19 @@ node scripts/build-cloudflare.mjs
 npx wrangler deploy
 ```
 
+## Origins and related work
+
+Jamie Brough first wrote json2Leaf in Go in 2019 to make nested documents relational and easy to query.
+The Rust implementation adds XML, WebAssembly, stable identifiers, and PostgreSQL output.
+Folio provides the browser workspace for this model.
+
+[SQLite `json_tree()`](https://www.sqlite.org/json1.html#jtree) and [DuckDB `json_tree()`](https://duckdb.org/docs/stable/data/json/json_functions) provide related document-to-row models.
+[Snowflake `FLATTEN`](https://docs.snowflake.com/en/sql-reference/functions/flatten) exposes compound values as relational rows.
+Folio combines materialized rows, stable identifiers, cross-format parent relationships, and a browser reporting workflow.
+
 ## Current scope
 
+Folio supports document analysis and reporting.
 The mapper supports JSON objects, arrays, strings, numbers, Booleans, and null values.
 The mapper represents each null value as an empty leaf set.
 
