@@ -3,47 +3,41 @@ use std::collections::HashSet;
 use quick_xml::Reader;
 use quick_xml::de::DeError;
 use quick_xml::escape::unescape;
-use quick_xml::events::{BytesStart, Event};
+use quick_xml::events::{BytesRef, BytesStart, Event};
 use serde_json::{Map, Value};
 
 use crate::mapper::{Config, Leaf, LeafBuilder, Record};
 
 pub fn xml_to_json(input: &str) -> Result<Value, DeError> {
     let mut reader = Reader::from_str(input);
-    reader.config_mut().trim_text(true);
+    reader.config_mut().trim_text(false);
 
-    let mut stack = Vec::new();
+    let mut stack: Vec<XmlNode> = Vec::new();
     let mut root = None;
+    let mut run = String::new();
 
     loop {
         match reader.read_event().map_err(DeError::from)? {
-            Event::Start(element) => stack.push(XmlNode::from_element(&element)?),
+            Event::Start(element) => {
+                flush_run(&mut run, stack.last_mut().map(|node| &mut node.text));
+                stack.push(XmlNode::from_element(&element)?);
+            }
             Event::Empty(element) => {
+                flush_run(&mut run, stack.last_mut().map(|node| &mut node.text));
                 attach(XmlNode::from_element(&element)?, &mut stack, &mut root)?;
             }
-            Event::Text(text) => {
-                if let Some(node) = stack.last_mut() {
-                    let decoded = text.xml_content()?;
-                    node.add_text(unescape(&decoded)?.as_ref());
-                }
-            }
-            Event::CData(text) => {
-                if let Some(node) = stack.last_mut() {
-                    node.add_text(text.xml_content()?.as_ref());
-                }
-            }
+            Event::Text(text) => run.push_str(&unescape(&text.xml_content()?)?),
+            Event::CData(text) => run.push_str(&text.xml_content()?),
+            Event::GeneralRef(reference) => push_reference(&mut run, &reference)?,
             Event::End(_) => {
+                flush_run(&mut run, stack.last_mut().map(|node| &mut node.text));
                 let node = stack.pop().ok_or_else(|| {
                     DeError::Custom("XML contains an unmatched closing element".to_owned())
                 })?;
                 attach(node, &mut stack, &mut root)?;
             }
             Event::Eof => break,
-            Event::Decl(_)
-            | Event::PI(_)
-            | Event::DocType(_)
-            | Event::Comment(_)
-            | Event::GeneralRef(_) => {}
+            Event::Decl(_) | Event::PI(_) | Event::DocType(_) | Event::Comment(_) => {}
         }
     }
 
@@ -60,15 +54,17 @@ pub(crate) fn xml_to_leaves(
 ) -> Result<Vec<Leaf>, DeError> {
     let repeated = repeated_element_paths(input)?;
     let mut reader = Reader::from_str(input);
-    reader.config_mut().trim_text(true);
+    reader.config_mut().trim_text(false);
 
     let mut builder = LeafBuilder::new(config, name, input.as_bytes());
-    let mut stack = Vec::new();
+    let mut stack: Vec<StreamFrame> = Vec::new();
     let mut root_seen = false;
+    let mut run = String::new();
 
     loop {
         match reader.read_event().map_err(DeError::from)? {
             Event::Start(element) => {
+                flush_run(&mut run, stack.last_mut().map(|frame| &mut frame.text));
                 if stack.is_empty() {
                     require_new_root(&mut root_seen)?;
                 }
@@ -76,35 +72,25 @@ pub(crate) fn xml_to_leaves(
                 stack.push(frame);
             }
             Event::Empty(element) => {
+                flush_run(&mut run, stack.last_mut().map(|frame| &mut frame.text));
                 if stack.is_empty() {
                     require_new_root(&mut root_seen)?;
                 }
                 let frame = open_stream_frame(&element, &mut stack, &repeated, &mut builder, name)?;
                 finish_stream_frame(frame, &mut builder);
             }
-            Event::Text(text) => {
-                if let Some(frame) = stack.last_mut() {
-                    let decoded = text.xml_content()?;
-                    frame.add_text(unescape(&decoded)?.as_ref());
-                }
-            }
-            Event::CData(text) => {
-                if let Some(frame) = stack.last_mut() {
-                    frame.add_text(text.xml_content()?.as_ref());
-                }
-            }
+            Event::Text(text) => run.push_str(&unescape(&text.xml_content()?)?),
+            Event::CData(text) => run.push_str(&text.xml_content()?),
+            Event::GeneralRef(reference) => push_reference(&mut run, &reference)?,
             Event::End(_) => {
+                flush_run(&mut run, stack.last_mut().map(|frame| &mut frame.text));
                 let frame = stack.pop().ok_or_else(|| {
                     DeError::Custom("XML contains an unmatched closing element".to_owned())
                 })?;
                 finish_stream_frame(frame, &mut builder);
             }
             Event::Eof => break,
-            Event::Decl(_)
-            | Event::PI(_)
-            | Event::DocType(_)
-            | Event::Comment(_)
-            | Event::GeneralRef(_) => {}
+            Event::Decl(_) | Event::PI(_) | Event::DocType(_) | Event::Comment(_) => {}
         }
     }
 
@@ -258,6 +244,46 @@ fn finish_stream_frame(frame: StreamFrame, builder: &mut LeafBuilder<'_>) {
     builder.add_string(&frame.record, &path, frame.text);
 }
 
+/// Adds a run of character data to an element's text. A run is the text, entity references
+/// and CDATA between two tags, joined exactly as written; runs are trimmed and separated by
+/// a space, as before.
+fn flush_run(run: &mut String, text: Option<&mut String>) {
+    if let Some(text) = text {
+        let value = run.trim();
+        if !value.is_empty() {
+            if !text.is_empty() {
+                text.push(' ');
+            }
+            text.push_str(value);
+        }
+    }
+    run.clear();
+}
+
+/// Resolves an entity or character reference in text. The predefined XML entities and
+/// character references become their characters; any other entity is kept as written,
+/// because its definition is not available here.
+fn push_reference(run: &mut String, reference: &BytesRef<'_>) -> Result<(), DeError> {
+    if let Some(character) = reference.resolve_char_ref()? {
+        run.push(character);
+        return Ok(());
+    }
+    let name = reference.decode()?;
+    match name.as_ref() {
+        "amp" => run.push('&'),
+        "lt" => run.push('<'),
+        "gt" => run.push('>'),
+        "apos" => run.push('\''),
+        "quot" => run.push('"'),
+        other => {
+            run.push('&');
+            run.push_str(other);
+            run.push(';');
+        }
+    }
+    Ok(())
+}
+
 fn element_name(element: &BytesStart<'_>) -> Result<String, DeError> {
     Ok(element
         .decoder()
@@ -291,18 +317,7 @@ struct StreamFrame {
     text: String,
 }
 
-impl StreamFrame {
-    fn add_text(&mut self, value: &str) {
-        let value = value.trim();
-        if value.is_empty() {
-            return;
-        }
-        if !self.text.is_empty() {
-            self.text.push(' ');
-        }
-        self.text.push_str(value);
-    }
-}
+impl StreamFrame {}
 
 #[derive(Debug)]
 struct XmlNode {
@@ -329,17 +344,6 @@ impl XmlNode {
             fields,
             text: String::new(),
         })
-    }
-
-    fn add_text(&mut self, value: &str) {
-        let value = value.trim();
-        if value.is_empty() {
-            return;
-        }
-        if !self.text.is_empty() {
-            self.text.push(' ');
-        }
-        self.text.push_str(value);
     }
 
     fn into_value(mut self) -> Value {
