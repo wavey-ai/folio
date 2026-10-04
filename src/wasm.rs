@@ -12,6 +12,13 @@ fn config(value: Option<String>) -> Result<Config, JsValue> {
     )
 }
 
+/// The browser transport does not carry stable keys, so compact mapping skips them.
+fn compact_config(value: Option<String>) -> Result<Config, JsValue> {
+    let mut config = config(value)?;
+    config.skip_stable_keys = true;
+    Ok(config)
+}
+
 fn js_error(error: impl std::fmt::Display) -> JsValue {
     JsValue::from_str(&error.to_string())
 }
@@ -67,7 +74,7 @@ pub fn map_json_compact(
     input: &[u8],
     config_json: Option<String>,
 ) -> Result<Vec<u8>, JsValue> {
-    let leaves = Mapper::new(config(config_json)?)
+    let leaves = Mapper::new(compact_config(config_json)?)
         .map_json(name, input)
         .map_err(js_error)?;
     compact::encode(&leaves).map_err(js_error)
@@ -80,7 +87,7 @@ pub fn map_xml_compact(
     config_json: Option<String>,
 ) -> Result<Vec<u8>, JsValue> {
     let input = std::str::from_utf8(input).map_err(js_error)?;
-    let leaves = Mapper::new(config(config_json)?)
+    let leaves = Mapper::new(compact_config(config_json)?)
         .map_xml(name, input)
         .map_err(js_error)?;
     compact::encode(&leaves).map_err(js_error)

@@ -2,6 +2,31 @@
 
 This plan records enhancements found during the comparison with other document-to-row systems.
 
+## Stable keys and exact values
+
+See [`docs/hashing.md`](docs/hashing.md).
+
+- [x] Give every record a stable 128-bit key and parent key that do not change when values change.
+- [x] Hash each field from its original key segments, so `__` in keys and differently spelled keys stay distinct.
+- [x] Hash each value's exact text, with a matching `folio_h64()` function in the PostgreSQL output.
+- [x] Keep every digit of JSON numbers.
+- [x] Resolve XML entity and character references instead of dropping them.
+- [ ] Accept a natural key per table, so inserting an array item does not change the keys of later items.
+- [ ] Store the original key spelling in the rows as well as in `path_hash`.
+
+## Hosted databases
+
+Findings are in [`docs/hosted-postgres.md`](docs/hosted-postgres.md).
+
+- [ ] Generate typed tables or views per inferred record type from the mapped rows.
+- [ ] Publish a catalog: field type, share of empty values, distinct count, common values, original key, role, units and suggested joins.
+- [ ] Map arrays of scalars and small tuples (tags, bounding boxes, coordinates) as array fields instead of records.
+- [ ] Stream mapping instead of holding whole documents and their leaves in memory.
+- [ ] Name root tables per source, not per file, when the command line maps many files.
+- [ ] Add importers for spreadsheets (header rows, merged headers, subtotal rows, cached formula values), columnar files with their source types, GeoJSON geometry and JSON Lines.
+- [ ] Store an ancestors array or closure table for roll-ups over whole trees.
+- [ ] Apply `table_substitutions` to `_tree` rows, and keep overridden columns in one record.
+
 ## Structural round trips
 
 A structural round trip rebuilds the same JSON data model or XML information set from mapped rows.

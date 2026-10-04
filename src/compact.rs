@@ -126,6 +126,9 @@ mod tests {
                 parent_id: None,
                 path: "name".to_owned(),
                 value: json!("report"),
+                key: "00".repeat(16).into(),
+                parent_key: None,
+                path_hash: 1,
             },
             Leaf {
                 data_type: DataType::Number,
@@ -134,6 +137,9 @@ mod tests {
                 parent_id: Some("abcdef-0".to_owned()),
                 path: "amount".to_owned(),
                 value: json!(12.5),
+                key: "11".repeat(16).into(),
+                parent_key: Some("00".repeat(16).into()),
+                path_hash: 2,
             },
         ];
 

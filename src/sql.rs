@@ -1,8 +1,6 @@
 use std::io::{self, Write};
 
-use serde_json::Value;
-
-use crate::{DataType, Leaf};
+use crate::Leaf;
 
 const SCHEMA: &str = "DROP TABLE IF EXISTS nodes CASCADE;\n\
 \n\
@@ -12,8 +10,25 @@ CREATE TABLE nodes (\n\
     name TEXT NOT NULL,\n\
     path TEXT NOT NULL,\n\
     data_type TEXT NOT NULL,\n\
-    value TEXT\n\
-);\n\n";
+    value TEXT,\n\
+    key UUID NOT NULL,\n\
+    parent_key UUID,\n\
+    path_hash BIGINT NOT NULL,\n\
+    value_hash BIGINT NOT NULL\n\
+);\n\
+\n\
+CREATE OR REPLACE FUNCTION folio_h64(TEXT) RETURNS BIGINT\n\
+LANGUAGE sql IMMUTABLE STRICT PARALLEL SAFE\n\
+AS $$ SELECT ('x' || encode(substr(sha256(convert_to($1, 'UTF8')), 1, 8), 'hex'))::bit(64)::bigint $$;\n\n";
+
+const COLUMNS: &str =
+    "id, parent_id, name, path, data_type, value, key, parent_key, path_hash, value_hash";
+
+const INDEXES: &str = "\n\
+CREATE INDEX nodes_name_key_idx ON nodes (name, key);\n\
+CREATE INDEX nodes_parent_key_idx ON nodes (parent_key);\n\
+CREATE INDEX nodes_name_path_idx ON nodes (name, path);\n\
+CREATE INDEX nodes_path_value_hash_idx ON nodes (path_hash, value_hash);\n";
 
 pub struct SqlWriter<W: Write> {
     writer: W,
@@ -31,26 +46,37 @@ impl<W: Write> InsertSqlWriter<W> {
     }
 
     pub fn write_leaves(&mut self, leaves: &[Leaf]) -> io::Result<()> {
+        require_keys(leaves)?;
         for leaf in leaves {
             let parent = leaf
                 .parent_id
                 .as_deref()
                 .map_or_else(|| "NULL".to_owned(), sql_literal);
+            let parent_key = leaf
+                .parent_key
+                .as_deref()
+                .map_or_else(|| "NULL".to_owned(), sql_literal);
+            let value = leaf.value_text();
             writeln!(
                 self.writer,
-                "INSERT INTO nodes (id, parent_id, name, path, data_type, value) VALUES ({}, {}, {}, {}, {}, {});",
+                "INSERT INTO nodes ({COLUMNS}) VALUES ({}, {}, {}, {}, {}, {}, {}, {}, {}, {});",
                 sql_literal(&leaf.id),
                 parent,
                 sql_literal(&clean_name(&leaf.name)),
                 sql_literal(&leaf.path),
                 sql_literal(&leaf.data_type.to_string()),
-                sql_literal(&plain_value(&leaf.value, leaf.data_type)),
+                sql_literal(&value),
+                sql_literal(&leaf.key),
+                parent_key,
+                leaf.path_hash,
+                crate::value_hash(&value),
             )?;
         }
         self.writer.flush()
     }
 
     pub fn finish(mut self) -> io::Result<W> {
+        self.writer.write_all(INDEXES.as_bytes())?;
         self.writer.flush()?;
         Ok(self.writer)
     }
@@ -66,10 +92,9 @@ impl<W: Write> SqlWriter<W> {
     }
 
     pub fn write_leaves(&mut self, leaves: &[Leaf]) -> io::Result<()> {
+        require_keys(leaves)?;
         if !self.started {
-            self.writer.write_all(
-                b"COPY nodes (id, parent_id, name, path, data_type, value) FROM stdin;\n",
-            )?;
+            writeln!(self.writer, "COPY nodes ({COLUMNS}) FROM stdin;")?;
             self.started = true;
         }
 
@@ -78,16 +103,24 @@ impl<W: Write> SqlWriter<W> {
                 .parent_id
                 .as_deref()
                 .map_or("\\N".to_owned(), escape_copy);
-            let value = format_value(&leaf.value, leaf.data_type);
+            let parent_key = leaf
+                .parent_key
+                .as_deref()
+                .map_or("\\N".to_owned(), escape_copy);
+            let value = leaf.value_text();
             writeln!(
                 self.writer,
-                "{}\t{}\t{}\t{}\t{}\t{}",
+                "{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}",
                 escape_copy(&leaf.id),
                 parent,
                 escape_copy(&clean_name(&leaf.name)),
                 escape_copy(&leaf.path),
                 leaf.data_type,
-                value
+                escape_copy(&value),
+                leaf.key,
+                parent_key,
+                leaf.path_hash,
+                crate::value_hash(&value),
             )?;
         }
         self.writer.flush()
@@ -97,6 +130,7 @@ impl<W: Write> SqlWriter<W> {
         if self.started {
             self.writer.write_all(b"\\.\n")?;
         }
+        self.writer.write_all(INDEXES.as_bytes())?;
         self.writer.flush()?;
         Ok(self.writer)
     }
@@ -122,15 +156,14 @@ pub fn leaves_to_insert_sql<'a>(
     String::from_utf8(bytes).map_err(|error| io::Error::new(io::ErrorKind::InvalidData, error))
 }
 
-fn format_value(value: &Value, data_type: DataType) -> String {
-    escape_copy(&plain_value(value, data_type))
-}
-
-fn plain_value(value: &Value, data_type: DataType) -> String {
-    match data_type {
-        DataType::String => value.as_str().unwrap_or_default().to_owned(),
-        DataType::Boolean | DataType::Number => value.to_string(),
+fn require_keys(leaves: &[Leaf]) -> io::Result<()> {
+    if leaves.iter().any(|leaf| leaf.key.is_empty()) {
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidInput,
+            "PostgreSQL output needs record keys; map without skip_stable_keys",
+        ));
     }
+    Ok(())
 }
 
 fn sql_literal(value: &str) -> String {
@@ -182,7 +215,22 @@ mod tests {
 
         assert!(sql.contains("CREATE TABLE nodes"));
         assert!(sql.contains("one\\ttwo"));
-        assert!(sql.ends_with("\\.\n"));
+        assert!(sql.contains("\\.\n"));
+        assert!(sql.contains("CREATE OR REPLACE FUNCTION folio_h64"));
+        assert!(sql.trim_end().ends_with("(path_hash, value_hash);"));
+    }
+
+    #[test]
+    fn refuses_rows_without_keys() {
+        let config = Config {
+            skip_stable_keys: true,
+            ..Config::default()
+        };
+        let leaves = Mapper::new(config)
+            .map_json("report", br#"{"a":"1"}"#)
+            .unwrap();
+        let error = leaves_to_sql([leaves.as_slice()]).unwrap_err();
+        assert_eq!(error.kind(), io::ErrorKind::InvalidInput);
     }
 
     #[test]

@@ -79,7 +79,20 @@ nodes(id, parent_id, name, path, data_type, value)
 Rows with the same `name` and `id` form an inferred record.
 The `parent_id` identifies its containing record.
 Structural rows use `name = '_tree'`; their `value` contains the inferred table name.
-Stable document-based identifiers make repeated mappings easy to compare.
+
+The PostgreSQL output adds four columns:
+
+```sql
+nodes(id, parent_id, name, path, data_type, value, key, parent_key, path_hash, value_hash)
+```
+
+`key` and `parent_key` are stable 128-bit record keys.
+They depend on the source name and each record's place in the document's structure, so editing values does not change them.
+`id` and `parent_id` number the records within one mapping and change with any edit.
+`path_hash` identifies a field from its original key spellings, and `value_hash` is a 64-bit hash of the value's exact text.
+See [`docs/hashing.md`](docs/hashing.md) for the definitions.
+
+Values are stored exactly as written: numbers keep every source digit, and XML entity and character references are resolved.
 
 The same model accepts JSON values, XML elements, XML attributes, and XML text.
 XML attribute paths start with `@`, and element text uses `$text`.
@@ -118,7 +131,23 @@ The browser database uses three PostgreSQL B-tree indexes:
 - `(parent_id)` for child lookups.
 - `(name, path)` for fields within an inferred table.
 
+The PostgreSQL output creates the same indexes on the stable keys, plus one for exact values:
+
+- `(name, key)` and `(parent_key)` for records and traversal.
+- `(name, path)` for fields.
+- `(path_hash, value_hash)` for exact matches on values of any length.
+
+Find an exact value through the hash index and compare the value too:
+
+```sql
+SELECT key FROM nodes
+WHERE path_hash = $1
+  AND value_hash = folio_h64('Smith & Sons Ltd')
+  AND value = 'Smith & Sons Ltd';
+```
+
 PostgreSQL chooses an execution plan for each query.
+[`docs/hosted-postgres.md`](docs/hosted-postgres.md) records measurements of these rows at scale.
 
 ### CSV input
 
@@ -176,6 +205,7 @@ cargo run -- report.json --format json
 ```
 
 Use `--config config.json` to set table names, substitutions, and column overrides.
+Set `skip_stable_keys` in the configuration to leave `key`, `parent_key` and `path_hash` empty when you do not need them.
 See [`config.example.json`](config.example.json) for the configuration format.
 
 ## Library use
@@ -260,12 +290,12 @@ npx wrangler deploy
 ## Origins and related work
 
 Jamie Brough first wrote json2Leaf in Go in 2019 to make nested documents relational and easy to query.
-The Rust implementation adds XML, WebAssembly, stable identifiers, and PostgreSQL output.
+The Rust implementation adds XML, WebAssembly, stable record keys, and PostgreSQL output.
 Folio provides the browser workspace for this model.
 
 [SQLite `json_tree()`](https://www.sqlite.org/json1.html#jtree) and [DuckDB `json_tree()`](https://duckdb.org/docs/stable/data/json/json_functions) provide related document-to-row models.
 [Snowflake `FLATTEN`](https://docs.snowflake.com/en/sql-reference/functions/flatten) exposes compound values as relational rows.
-Folio combines materialized rows, stable identifiers, cross-format parent relationships, and a browser reporting workflow.
+Folio combines materialized rows, stable record keys, cross-format parent relationships, and a browser reporting workflow.
 
 ## Current scope
 

@@ -3,6 +3,7 @@
 #[cfg(any(all(target_arch = "wasm32", feature = "wasm"), test))]
 mod compact;
 mod graph;
+mod hash;
 mod mapper;
 mod redactor;
 mod replacer;
@@ -16,6 +17,7 @@ mod xml;
 mod wasm;
 
 pub use graph::Graph;
+pub use hash::{h64, value_hash};
 pub use mapper::{ColumnOverride, Config, DataType, Leaf, Mapper, Substitution};
 pub use redactor::redact;
 pub use replacer::Replacer;

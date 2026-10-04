@@ -1,9 +1,12 @@
 use std::collections::{HashMap, HashSet};
 use std::fmt;
+use std::sync::Arc;
 
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use sha2::{Digest, Sha256};
+
+use crate::hash::{self, Part, RecordKey};
 
 #[derive(Clone, Debug, Default, Deserialize, Serialize)]
 pub struct Config {
@@ -15,6 +18,10 @@ pub struct Config {
     pub table_names: Vec<String>,
     #[serde(default)]
     pub table_substitutions: Vec<Substitution>,
+    /// Leave `key`, `parent_key` and `path_hash` empty, for callers that do not use them.
+    /// Mapping is then about as fast as without stable keys.
+    #[serde(default)]
+    pub skip_stable_keys: bool,
 }
 
 #[derive(Clone, Debug, Deserialize, Serialize)]
@@ -53,10 +60,43 @@ impl fmt::Display for DataType {
 pub struct Leaf {
     pub data_type: DataType,
     pub name: String,
+    /// Row number of the record within this mapping. Any change to the document changes it.
     pub id: String,
     pub parent_id: Option<String>,
     pub path: String,
     pub value: Value,
+    /// Stable 128-bit record key as 32 hex digits. It depends only on the source name and the
+    /// record's position in the document structure, not on the document's values.
+    /// Empty when [`Config::skip_stable_keys`] is set.
+    pub key: Arc<str>,
+    pub parent_key: Option<Arc<str>>,
+    /// Stable hash of the record type and field path, from the original key spellings.
+    #[serde(with = "hash::i64_string")]
+    pub path_hash: i64,
+}
+
+impl Leaf {
+    /// The value's text as stored in `nodes.value`. Strings are unchanged, numbers keep their
+    /// source spelling and booleans are `true` or `false`. NUL characters are removed, because
+    /// PostgreSQL text cannot hold them.
+    #[must_use]
+    pub fn value_text(&self) -> String {
+        let text = match &self.value {
+            Value::String(text) => text.clone(),
+            other => other.to_string(),
+        };
+        if text.contains('\0') {
+            text.replace('\0', "")
+        } else {
+            text
+        }
+    }
+
+    /// The hash of [`Leaf::value_text`], equal to `folio_h64(value)` in the generated SQL.
+    #[must_use]
+    pub fn value_hash(&self) -> i64 {
+        hash::value_hash(&self.value_text())
+    }
 }
 
 #[derive(Clone, Debug, Default)]
@@ -103,8 +143,8 @@ impl Mapper {
 
     fn map_value_with_seed(&self, name: &str, value: &Value, seed: &[u8]) -> Vec<Leaf> {
         let mut state = MapState::new(&self.config, name, seed);
-        let root = state.ids.next();
-        state.visit(name, "", root, None, value);
+        let root = state.root_record(name);
+        state.visit(name, "", &mut Vec::new(), root, value);
         state.leaves
     }
 }
@@ -114,37 +154,45 @@ pub(crate) struct Record {
     pub(crate) id: String,
     pub(crate) parent_id: Option<String>,
     pub(crate) name: String,
+    key: RecordKey,
+    key_hex: Arc<str>,
+    parent_key_hex: Option<Arc<str>>,
+    record_type: u32,
 }
 
 pub(crate) struct LeafBuilder<'a> {
     state: MapState<'a>,
+    item_counts: HashMap<(RecordKey, String), u64>,
 }
 
 impl<'a> LeafBuilder<'a> {
     pub(crate) fn new(config: &'a Config, name: &str, seed: &[u8]) -> Self {
         Self {
             state: MapState::new(config, name, seed),
+            item_counts: HashMap::new(),
         }
     }
 
     pub(crate) fn root(&mut self, name: &str) -> Record {
-        let record = Record {
-            id: self.state.ids.next(),
-            parent_id: None,
-            name: name.to_owned(),
-        };
-        self.state.ensure_tree(&record.id, None, &record.name);
+        let record = self.state.root_record(name);
+        self.state.ensure_tree(&record, &record.name);
         record
     }
 
     pub(crate) fn child(&mut self, parent: &Record, path: &str) -> Record {
-        let record = Record {
-            id: self.state.ids.next(),
-            parent_id: Some(parent.id.clone()),
-            name: format!("{}__{path}", parent.name),
-        };
-        self.state
-            .ensure_tree(&record.id, record.parent_id.as_deref(), &record.name);
+        let count = self
+            .item_counts
+            .entry((parent.key, path.to_owned()))
+            .or_insert(0);
+        let index = *count;
+        *count += 1;
+        let record = self.state.child_record(
+            parent,
+            format!("{}__{path}", parent.name),
+            vec![Part::Key(path.to_owned())],
+            Some(index),
+        );
+        self.state.ensure_tree(&record, &record.name);
         record
     }
 
@@ -152,8 +200,8 @@ impl<'a> LeafBuilder<'a> {
         self.state.add_leaf(
             &record.name,
             path,
-            record.id.clone(),
-            record.parent_id.clone(),
+            record.clone(),
+            vec![Part::Key(path.to_owned())],
             Value::String(value),
         );
     }
@@ -169,6 +217,10 @@ struct MapState<'a> {
     leaves: Vec<Leaf>,
     tree_nodes: HashSet<String>,
     overrides: HashMap<(&'a str, &'a str), (&'a str, &'a str)>,
+    record_types: Vec<Vec<Part>>,
+    record_type_ids: HashMap<Vec<Part>, u32>,
+    path_hashes: HashMap<(u32, Vec<Part>), i64>,
+    stable_keys: bool,
 }
 
 impl<'a> MapState<'a> {
@@ -190,6 +242,98 @@ impl<'a> MapState<'a> {
             leaves: Vec::new(),
             tree_nodes: HashSet::new(),
             overrides,
+            record_types: Vec::new(),
+            record_type_ids: HashMap::new(),
+            path_hashes: HashMap::new(),
+            stable_keys: !config.skip_stable_keys,
+        }
+    }
+
+    fn record_type_id(&mut self, record_type: Vec<Part>) -> u32 {
+        if let Some(id) = self.record_type_ids.get(&record_type) {
+            return *id;
+        }
+        let id = u32::try_from(self.record_types.len()).unwrap_or(u32::MAX);
+        self.record_types.push(record_type.clone());
+        self.record_type_ids.insert(record_type, id);
+        id
+    }
+
+    fn path_hash(&mut self, record_type: u32, field: Vec<Part>) -> i64 {
+        if !self.stable_keys {
+            return 0;
+        }
+        let cache_key = (record_type, field);
+        if let Some(hash) = self.path_hashes.get(&cache_key) {
+            return *hash;
+        }
+        let parts = &self.record_types[record_type as usize];
+        let hash = hash::path_hash(parts, &cache_key.1);
+        self.path_hashes.insert(cache_key, hash);
+        hash
+    }
+
+    fn root_record(&mut self, name: &str) -> Record {
+        let id = self.ids.next();
+        if !self.stable_keys {
+            return Record {
+                id,
+                parent_id: None,
+                name: name.to_owned(),
+                key: [0; 16],
+                key_hex: Arc::from(""),
+                parent_key_hex: None,
+                record_type: 0,
+            };
+        }
+        let steps = vec![Part::Source(name.to_owned())];
+        let key = hash::record_key(None, &steps, None);
+        Record {
+            id,
+            parent_id: None,
+            name: name.to_owned(),
+            key,
+            key_hex: Arc::from(hash::key_hex(&key)),
+            parent_key_hex: None,
+            record_type: self.record_type_id(steps),
+        }
+    }
+
+    fn child_record(
+        &mut self,
+        parent: &Record,
+        name: String,
+        steps: Vec<Part>,
+        index: Option<u64>,
+    ) -> Record {
+        let id = self.ids.next();
+        if !self.stable_keys {
+            return Record {
+                id,
+                parent_id: Some(parent.id.clone()),
+                name,
+                key: [0; 16],
+                key_hex: parent.key_hex.clone(),
+                parent_key_hex: None,
+                record_type: 0,
+            };
+        }
+        let key = hash::record_key(Some(&parent.key), &steps, index);
+        let parent_type = &self.record_types[parent.record_type as usize];
+        let mut record_type = Vec::with_capacity(parent_type.len() + steps.len() + 1);
+        record_type.extend_from_slice(parent_type);
+        record_type.extend(steps);
+        if index.is_some() {
+            record_type.push(Part::Items);
+        }
+        Record {
+            id,
+            parent_id: Some(parent.id.clone()),
+            name,
+            key,
+            key_hex: Arc::from(hash::key_hex(&key)),
+            parent_key_hex: Some(parent.key_hex.clone()),
+            record_type: self.record_type_id(record_type),
         }
     }
 
@@ -197,8 +341,8 @@ impl<'a> MapState<'a> {
         &mut self,
         name: &str,
         path: &str,
-        mut node: String,
-        mut parent: Option<String>,
+        segments: &mut Vec<String>,
+        mut record: Record,
         value: &Value,
     ) {
         if value.is_null() {
@@ -207,30 +351,42 @@ impl<'a> MapState<'a> {
 
         let mut name = name.to_owned();
         let mut path = path.to_owned();
+        let mut promoted_segments = Vec::new();
+        let mut segments = segments;
 
         if self.config.table_names.iter().any(|item| item == &path) {
             name = path;
             path = String::new();
-            parent = Some(node);
-            node = self.ids.next();
+            let mut steps = key_parts(segments);
+            steps.push(Part::Table);
+            record = self.child_record(&record, name.clone(), steps, None);
+            segments = &mut promoted_segments;
         }
 
-        self.ensure_tree(&node, parent.as_deref(), &name);
+        self.ensure_tree(&record, &name);
 
         match value {
             Value::Bool(_) | Value::Number(_) | Value::String(_) => {
+                let field = if segments.is_empty() {
+                    vec![Part::ScalarItem]
+                } else {
+                    key_parts(segments)
+                };
                 if path.is_empty() {
                     path = "value".to_owned();
                 }
-                self.add_leaf(&name, &path, node, parent, value.clone());
+                self.add_leaf(&name, &path, record, field, value.clone());
             }
             Value::Array(items) => {
                 if !path.is_empty() && !name.is_empty() {
                     name = format!("{name}__{path}");
                 }
-                for item in items {
-                    let child = self.ids.next();
-                    self.visit(&name, "", child, Some(node.clone()), item);
+                let steps = key_parts(segments);
+                for (index, item) in items.iter().enumerate() {
+                    let index = u64::try_from(index).unwrap_or(u64::MAX);
+                    let child =
+                        self.child_record(&record, name.clone(), steps.clone(), Some(index));
+                    self.visit(&name, "", &mut Vec::new(), child, item);
                 }
             }
             Value::Object(items) => {
@@ -240,7 +396,9 @@ impl<'a> MapState<'a> {
                     } else {
                         format!("{path}__{key}")
                     };
-                    self.visit(&name, &next_path, node.clone(), parent.clone(), item);
+                    segments.push(key.clone());
+                    self.visit(&name, &next_path, segments, record.clone(), item);
+                    segments.pop();
                 }
             }
             Value::Null => {}
@@ -251,11 +409,10 @@ impl<'a> MapState<'a> {
         &mut self,
         name: &str,
         path: &str,
-        mut node: String,
-        mut parent: Option<String>,
+        mut record: Record,
+        mut field: Vec<Part>,
         value: Value,
     ) {
-        let old_node = node.clone();
         let mut name = apply_substitutions(to_snake_case(name), &self.config.table_substitutions);
         let mut path = apply_substitutions(to_snake_case(path), &self.config.column_substitutions);
 
@@ -264,10 +421,14 @@ impl<'a> MapState<'a> {
             .get(&(name.as_str(), path.as_str()))
             .map(|(table, path)| ((*table).to_owned(), (*path).to_owned()))
         {
+            let steps = vec![
+                Part::Override(target_table.clone()),
+                Part::Key(target_path.clone()),
+            ];
+            record = self.child_record(&record, target_table.clone(), steps, None);
+            field = vec![Part::Key(target_path.clone())];
             name = target_table;
             path = target_path;
-            parent = Some(old_node);
-            node = self.ids.next();
         }
 
         let data_type = match value {
@@ -277,30 +438,42 @@ impl<'a> MapState<'a> {
             _ => unreachable!("scalar values become leaves"),
         };
 
+        let path_hash = self.path_hash(record.record_type, field);
         self.leaves.push(Leaf {
             data_type,
             name: name.clone(),
-            id: node.clone(),
-            parent_id: parent.clone(),
+            id: record.id.clone(),
+            parent_id: record.parent_id.clone(),
             path,
             value,
+            key: record.key_hex.clone(),
+            parent_key: record.parent_key_hex.clone(),
+            path_hash,
         });
 
-        self.ensure_tree(&node, parent.as_deref(), &name);
+        self.ensure_tree(&record, &name);
     }
 
-    fn ensure_tree(&mut self, node: &str, parent: Option<&str>, name: &str) {
-        if self.tree_nodes.insert(node.to_owned()) {
+    fn ensure_tree(&mut self, record: &Record, name: &str) {
+        if self.tree_nodes.insert(record.id.clone()) {
+            let path_hash = self.path_hash(record.record_type, vec![Part::Tree]);
             self.leaves.push(Leaf {
                 data_type: DataType::String,
                 name: "_tree".to_owned(),
-                id: node.to_owned(),
-                parent_id: parent.map(str::to_owned),
+                id: record.id.clone(),
+                parent_id: record.parent_id.clone(),
                 path: "name".to_owned(),
                 value: Value::String(to_snake_case(name)),
+                key: record.key_hex.clone(),
+                parent_key: record.parent_key_hex.clone(),
+                path_hash,
             });
         }
     }
+}
+
+fn key_parts(segments: &[String]) -> Vec<Part> {
+    segments.iter().cloned().map(Part::Key).collect()
 }
 
 struct IdFactory {
