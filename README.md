@@ -158,6 +158,50 @@ Cell values remain strings to preserve leading zeros and large identifiers.
 CSV import supports quoted commas, escaped quotes, multiline cells, and UTF-8 files with a byte order mark.
 Folio ignores empty lines outside quoted cells.
 
+## Performance in PostgreSQL
+
+json2Leaf rows were benchmarked in PostgreSQL 18 against two JSONB layouts and a typed table holding the same data.
+The same 42 million records (a 2M-row table, a 20M-row table and 200 tenants with 100k rows each) were loaded into every layout and queried in one run.
+Times are warm medians.
+
+| Query, 20M-row table | Best-practice JSONB | json2Leaf rows | Typed table | Winner |
+| --- | --- | --- | --- | --- |
+| Sort on any field, top 100 | 2.25 s | **14 ms** | 0.94 s | json2Leaf, 160× |
+| Count distinct | 17.9 s | **2.9 s** | 8.1 s | json2Leaf, 6× |
+| Search all of a tenant's datasets | 0.93 s | **0.13 s** | 0.47 s | json2Leaf, 7× |
+| Filter on an unindexed field | 1.87 s | **1.05 s** | 1.31 s | json2Leaf |
+| Update one value | 1.7 ms | **1.4 ms** | 5.0 ms | json2Leaf, half the WAL |
+| Group-by over all 20M rows | 17.3 s | 14.5 s | **1.16 s** | Typed, 12× |
+| Join 2M rows to 20M rows | 8.7 s | 10.2 s | **3.5 s** | Typed |
+| Three-way join, top 100 | 21.6 s | 181 s | **12 ms** | Typed |
+| Filter on an indexed field | 84 ms | 357 ms | **41 ms** | Typed |
+| Size, and full load with indexes | 20.7 GB, 41 min | 67.7 GB, 101 min | **8.2 GB, 14 min** | Typed |
+
+Best-practice JSONB here means one row per record, typed values under short keys, a partition per dataset, expression and GIN indexes on the expected fields, and extended statistics.
+It is never the fastest option.
+json2Leaf rows win everything that looks for something: any field, any dataset, single-value writes.
+A typed table wins everything that reads a whole large dataset.
+For hosted use, store every document as json2Leaf rows and add a typed table per large record type.
+
+Against a plain per-row JSONB layout (one row per record, values keyed by column id, a GIN index) on a 2M-row table, json2Leaf rows were 11 to 290 times faster:
+
+| Query, 2M-row table | Per-row JSONB | json2Leaf rows | Faster |
+| --- | --- | --- | --- |
+| Sort on any field, top 100 | 6.1 s | 21 ms | 290× |
+| Count distinct | 13.6 s | 0.20 s | 68× |
+| Update one value | 83 ms | 1.9 ms | 44× |
+| Group-by over all rows | 18.5 s | 0.47 s | 39× |
+| Category and date filter | 1.25 s | 38 ms | 33× |
+| Three-way join, top 100 | 7.8 s | 0.35 s | 22× |
+| Upsert 5,000 rows | 17.4 s | 0.82 s | 21× |
+| Join to a second dataset | 6.9 s | 0.62 s | 11× |
+
+How the rows are stored matters.
+Rows ordered by field, or partitioned by field type, keep one field's values together; on 2M rows that took a group-by from 6.2 s (rows ordered by record) to 0.47 s, and a join between datasets from 26 s to 0.62 s.
+The single-table `nodes` layout with text values is the exchange and browser format, not a store for large data.
+
+[`docs/hosted-postgres.md`](docs/hosted-postgres.md) has the setup, the full results, trees, indexes and the mapping issues found across nine document types.
+
 ## Local development
 
 Install Rust 1.85 or later, Node.js, and `wasm-pack`.

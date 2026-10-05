@@ -1,13 +1,14 @@
 # json2Leaf rows in a hosted PostgreSQL database
 
 These findings come from running json2Leaf output at scale in PostgreSQL, outside the browser, in October 2026.
-They compare three layouts: the `nodes` table as json2Leaf writes it, typed and indexed leaf rows, and typed tables generated per inferred record type.
+They compare the `nodes` table as json2Leaf writes it, typed and indexed leaf rows, typed tables generated per inferred record type, and two JSONB layouts holding the same data.
 
 In short:
 
 - The model works for every document shape tested: records, parent links and a catalog of inferred tables and fields answered every question, including joins across documents.
 - The `nodes` table as written is a good exchange and browser format, but a slow store: 3 to 240 times slower than typed tables, and the largest.
-- Typed, indexed leaf rows are fast for selective lookups on any field with no per-field index, and for traversal. They are 4 to 15 times slower than typed tables on whole-table aggregates and wide joins, and about 11 times larger.
+- Typed, indexed leaf rows are fast for selective lookups on any field with no per-field index, and for traversal. Stored in record order they are 4 to 15 times slower than typed tables on whole-table aggregates and wide joins; stored by field the gap falls to 2 to 3 times. They are about 8 to 11 times larger.
+- Against JSONB: a plain per-row JSONB layout was 11 to 290 times slower than leaf rows, and a best-practice JSONB layout was never the fastest option at 20 million rows. Leaf rows won every query that looks for something; typed tables won every query that reads a whole large dataset.
 - Typed tables generated per inferred record type are the fastest query surface and the easiest SQL to write.
 - Several mapping issues silently changed or dropped data. The XML entity loss, the `__` path ambiguity in hashes, number rounding and record identity are fixed; the rest are listed below.
 
@@ -59,6 +60,59 @@ The cost per row is mostly PostgreSQL's fixed tuple and index overhead, so encod
 
 On 100,000 rows of 20 fields, the `nodes` table as written used 293 MB against 22 MB typed.
 A filter took 967 ms (143 to 239 ms written as a semi-join) against 14.5 ms, and a group-by 200 ms against 33 ms.
+
+## 20 million rows against JSONB
+
+The same 42 million records (a 2M-row table, a 20M-row table and 200 tenants with 100k rows each) were loaded into three layouts and queried in one run:
+
+- **Best-practice JSONB:** one row per record, typed values under short keys, a partition per dataset, expression and GIN indexes on the expected fields, extended statistics.
+- **json2Leaf rows:** typed leaf rows, partitioned per dataset and by field type.
+- **Typed table:** real typed columns per record type.
+
+| Query, 20M-row table | Best-practice JSONB | json2Leaf rows | Typed table | Winner |
+| --- | --- | --- | --- | --- |
+| Sort on any field, top 100 | 2.25 s | **14 ms** | 0.94 s | json2Leaf, 160× |
+| Count distinct | 17.9 s | **2.9 s** | 8.1 s | json2Leaf, 6× |
+| Search all of a tenant's datasets | 0.93 s | **0.13 s** | 0.47 s | json2Leaf, 7× |
+| Filter on an unindexed field | 1.87 s | **1.05 s** | 1.31 s | json2Leaf |
+| Update one value | 1.7 ms | **1.4 ms** | 5.0 ms | json2Leaf, half the WAL |
+| Group-by over all 20M rows | 17.3 s | 14.5 s | **1.16 s** | Typed, 12× |
+| Join 2M rows to 20M rows | 8.7 s | 10.2 s | **3.5 s** | Typed |
+| Three-way join, top 100 | 21.6 s | 181 s | **12 ms** | Typed |
+| Filter on an indexed field | 84 ms | 357 ms | **41 ms** | Typed |
+| Size, and full load with indexes | 20.7 GB, 41 min | 67.7 GB, 101 min | **8.2 GB, 14 min** | Typed |
+
+Best-practice JSONB was never the fastest option.
+The three-way join is the warning: at 2 million rows it took 0.35 s on leaf rows, and at 20 million 181 s, against 12 ms on a typed table.
+Large record types need a typed table beside their leaf rows.
+
+On the 200 small tenant datasets (100k rows each) every layout answered in milliseconds; leaf rows were fastest on count distinct (6.8 ms against 35–55 ms) and on sorting any field.
+
+Against a plain per-row JSONB layout (one row per record, values keyed by column id, a GIN index), on the 2M-row table:
+
+| Query, 2M-row table | Per-row JSONB | json2Leaf rows | Faster |
+| --- | --- | --- | --- |
+| Sort on any field, top 100 | 6.1 s | 21 ms | 290× |
+| Count distinct | 13.6 s | 0.20 s | 68× |
+| Update one value | 83 ms, 2.7 MB WAL | 1.9 ms | 44× |
+| Group-by over all rows | 18.5 s | 0.47 s | 39× |
+| Category and date filter | 1.25 s | 38 ms | 33× |
+| Three-way join, top 100 | 7.8 s | 0.35 s | 22× |
+| Upsert 5,000 rows | 17.4 s | 0.82 s | 21× |
+| Join to a second dataset | 6.9 s | 0.62 s | 11× |
+
+The per-row layout repeats every column key on every row, so rows are compressed out of line and every query decompresses all of them.
+
+### Storing leaf rows by field
+
+| Query, 2M rows | Rows in record order | Rows in field order | Partitioned by field type | Typed table |
+| --- | --- | --- | --- | --- |
+| Group-by over all rows | 6.2 s | 0.49 s | 0.47 s | 0.17 s |
+| Join to a second dataset | 26 s | 3.3 s | 0.62 s | 0.32 s |
+| Count distinct | 0.31 s | 0.24 s | 0.20 s | 2.6 s |
+| Sort on a number, top 100 | 3.8 ms | 4.7 ms | 21 ms | 1 ms indexed |
+
+Keeping one field's values together, as a column store does, is what brings leaf rows within 2 to 3 times of typed tables on scans.
 
 ## Nine document shapes
 
@@ -167,6 +221,7 @@ It still lacked each field's original key and source format, its role (identifie
 ## Recommendation
 
 For hosted use, keep the json2Leaf model, the stable keys and the catalog.
-Generate typed tables (or views) per inferred record type as the query surface.
-Keep typed leaf rows as an optional layer for rare keys and lookups on any field, and for history.
+Store every document as typed leaf rows, partitioned per dataset and by field type: they answer any question about any field without choosing indexes, and they take writes cheaply.
+Add a typed table per large record type for whole-dataset aggregates and joins.
+Give agents generated views or that typed table, not hand-written pivots over leaf rows.
 Keep the `nodes` table as the exchange and browser format.
